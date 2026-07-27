@@ -843,12 +843,9 @@ export class CcConnectRuntimeProvider extends EventEmitter implements RuntimePro
     const channel = ccConnectSessionChannel(session.logicalKey);
     let transcriptMessages: RawMessage[] = [];
     if (channel) {
-      const codexHomeDirs = new Set([
-        this.currentProjectProfileByAgent.get(session.agentId)?.codexHomeDir,
-        this.currentProviderProfile?.codexHomeDir,
-        ...this.currentProjectProfiles.map((profile) => profile.codexHomeDir),
-        getCcConnectCodexHomeDir(),
-      ].filter((value): value is string => Boolean(value)));
+      const owningProfile = this.currentProjectProfileByAgent.get(session.agentId)
+        ?? this.currentProviderProfile;
+      const codexHomeDir = owningProfile?.codexHomeDir ?? getCcConnectCodexHomeDir();
       const transcriptTurnHints = publicMessages.slice(-limit).flatMap((message) => {
         const content = message.role === 'user' ? runtimeMessageText(message.content) : '';
         return content && typeof message.timestamp === 'number'
@@ -857,7 +854,7 @@ export class CcConnectRuntimeProvider extends EventEmitter implements RuntimePro
       });
       if (session.agentSessionId || transcriptTurnHints.length > 0) {
         transcriptMessages = await loadCcConnectCodexTranscriptTools(
-          codexHomeDirs,
+          codexHomeDir,
           session.agentSessionId ?? '',
           transcriptTurnHints,
           this.currentProjectWorkDirByAgent.get(session.agentId),

@@ -848,7 +848,6 @@ export class CcConnectBridgeAdapter {
         if (this.socket === socket) {
           this.socket = null;
           this.clearHeartbeat();
-          this.failPendingRuns('cc-connect bridge disconnected before the run completed');
           this.scheduleReconnect();
         }
         finish(new Error('cc-connect bridge connection closed'));

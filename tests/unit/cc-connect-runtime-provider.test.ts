@@ -2490,11 +2490,10 @@ describe('CcConnectRuntimeProvider', () => {
   it('merges Codex transcript tool calls into cc-connect channel history', async () => {
     const agentSessionId = '019fa23b-1dad-76b1-9910-c47608ebf367';
     const staleAgentSessionId = '019fa000-0000-7000-8000-000000000000';
+    const ownerCodexHome = join(tempDir, 'runtimes', 'cc-connect', 'codex-home');
+    const otherAgentCodexHome = join(tempDir, 'credentials', 'other-agent', 'codex-home');
     const transcriptDir = join(
-      tempDir,
-      'runtimes',
-      'cc-connect',
-      'codex-home',
+      ownerCodexHome,
       'sessions',
       '2026',
       '07',
@@ -2508,6 +2507,7 @@ describe('CcConnectRuntimeProvider', () => {
         payload: {
           id: agentSessionId,
           timestamp: '2026-07-27T06:20:10.931Z',
+          cwd: '/tmp/workspace',
         },
       }),
       JSON.stringify({
@@ -2539,10 +2539,42 @@ describe('CcConnectRuntimeProvider', () => {
         },
       }),
     ].join('\n'), 'utf8');
+    const otherTranscriptDir = join(otherAgentCodexHome, 'sessions', '2026', '07', '27');
+    await mkdir(otherTranscriptDir, { recursive: true });
+    await writeFile(join(otherTranscriptDir, `rollout-${staleAgentSessionId}.jsonl`), [
+      JSON.stringify({
+        timestamp: '2026-07-27T06:20:10.931Z',
+        type: 'session_meta',
+        payload: {
+          id: staleAgentSessionId,
+          timestamp: '2026-07-27T06:20:10.931Z',
+          cwd: '/tmp/workspace',
+        },
+      }),
+      JSON.stringify({
+        timestamp: '2026-07-27T06:20:10.950Z',
+        type: 'response_item',
+        payload: {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: '你在哪' }],
+        },
+      }),
+      JSON.stringify({
+        timestamp: '2026-07-27T06:20:17.195Z',
+        type: 'response_item',
+        payload: {
+          type: 'function_call',
+          name: 'exec_command',
+          arguments: '{"cmd":"must-not-cross-agent"}',
+          call_id: 'call-other-agent',
+        },
+      }),
+    ].join('\n'), 'utf8');
     const { loadCcConnectCodexTranscriptTools } = await import('@electron/runtime/cc-connect-codex-transcript');
     await expect(loadCcConnectCodexTranscriptTools([
       join(tempDir, 'credentials', 'current-provider', 'codex-home'),
-      join(tempDir, 'runtimes', 'cc-connect', 'codex-home'),
+      ownerCodexHome,
     ], agentSessionId)).resolves.toHaveLength(2);
 
     const channelSession = {
@@ -2604,6 +2636,19 @@ describe('CcConnectRuntimeProvider', () => {
       skillSyncer: vi.fn(async () => ({ skills: [] })),
       providerProfileLoader: vi.fn(async () => createProviderProfile()) as never,
     });
+    Reflect.set(provider, 'currentProjectProfileByAgent', new Map([
+      ['project-manager', createProviderProfile({ codexHomeDir: ownerCodexHome })],
+    ]));
+    Reflect.set(provider, 'currentProjectProfiles', [
+      createProviderProfile({ codexHomeDir: ownerCodexHome }),
+      createProviderProfile({ codexHomeDir: otherAgentCodexHome }),
+    ]);
+    Reflect.set(provider, 'currentProviderProfile', createProviderProfile({
+      codexHomeDir: otherAgentCodexHome,
+    }));
+    Reflect.set(provider, 'currentProjectWorkDirByAgent', new Map([
+      ['project-manager', '/tmp/workspace'],
+    ]));
 
     await expect(provider.loadHistory({
       sessionKey: guiSession.logicalKey,
@@ -2640,6 +2685,10 @@ describe('CcConnectRuntimeProvider', () => {
         expect.objectContaining({ id: 'channel-assistant', role: 'assistant' }),
       ],
     });
+    expect(JSON.stringify(await provider.loadHistory({
+      sessionKey: channelSession.logicalKey,
+      limit: 20,
+    }))).not.toContain('must-not-cross-agent');
   });
 
   it('rejects stale cross-workspace session IDs and matches later Web Search and MCP turns', async () => {
@@ -2823,6 +2872,70 @@ describe('CcConnectRuntimeProvider', () => {
     );
     expect(JSON.stringify(idMatchedMessages)).toContain('first-call');
     expect(JSON.stringify(idMatchedMessages)).not.toContain('second-call');
+  });
+
+  it('bounds fallback transcript scanning before reading older candidates', async () => {
+    const transcriptDir = join(
+      tempDir,
+      'runtimes',
+      'cc-connect',
+      'codex-home',
+      'sessions',
+      '2026',
+      '07',
+      '27',
+    );
+    await mkdir(transcriptDir, { recursive: true });
+    const turnTimestamp = Date.parse('2026-07-27T06:30:10.100Z');
+    const transcript = (content: string, callId: string) => [
+      JSON.stringify({
+        timestamp: '2026-07-27T06:00:10.000Z',
+        type: 'session_meta',
+        payload: {
+          timestamp: '2026-07-27T06:00:10.000Z',
+          cwd: '/workspace/coder',
+        },
+      }),
+      JSON.stringify({
+        timestamp: '2026-07-27T06:30:10.100Z',
+        type: 'response_item',
+        payload: {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: content }],
+        },
+      }),
+      JSON.stringify({
+        timestamp: '2026-07-27T06:30:11.000Z',
+        type: 'response_item',
+        payload: {
+          type: 'function_call',
+          call_id: callId,
+          name: 'exec_command',
+          arguments: '{"cmd":"bounded"}',
+        },
+      }),
+    ].join('\n');
+    await Promise.all([
+      writeFile(
+        join(transcriptDir, 'rollout-2026-07-27T00-00-00-target.jsonl'),
+        transcript('bounded fallback target', 'target-call'),
+        'utf8',
+      ),
+      ...Array.from({ length: 64 }, (_, index) => writeFile(
+        join(transcriptDir, `rollout-2026-07-27T12-${String(index).padStart(2, '0')}-00-decoy.jsonl`),
+        transcript('different prompt', `decoy-${index}`),
+        'utf8',
+      )),
+    ]);
+
+    const { loadCcConnectCodexTranscriptTools } = await import('@electron/runtime/cc-connect-codex-transcript');
+    await expect(loadCcConnectCodexTranscriptTools(
+      join(tempDir, 'runtimes', 'cc-connect', 'codex-home'),
+      '',
+      [{ content: 'bounded fallback target', timestamp: turnTimestamp }],
+      '/workspace/coder',
+    )).resolves.toEqual([]);
   });
 
   it('aborts active cc-connect chat runs through Bridge without restarting the runtime', async () => {

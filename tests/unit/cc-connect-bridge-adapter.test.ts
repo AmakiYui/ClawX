@@ -945,6 +945,7 @@ describe('cc-connect BridgePlatform adapter', () => {
     const received: Record<string, unknown>[] = [];
     const emitted: Array<[string, unknown]> = [];
     const progressPrefix = '__cc_connect_progress_card_v1__:';
+    let droppedMessage: Record<string, unknown> | undefined;
 
     server.on('connection', (socket) => {
       sockets.push(socket);
@@ -953,29 +954,31 @@ describe('cc-connect BridgePlatform adapter', () => {
         received.push(parsed);
         if (parsed.type === 'register') {
           socket.send(JSON.stringify({ type: 'register_ack', ok: true }));
+          if (sockets.indexOf(socket) === 1 && droppedMessage) {
+            setTimeout(() => {
+              socket.send(JSON.stringify({
+                type: 'reply',
+                session_key: droppedMessage?.session_key,
+                reply_ctx: droppedMessage?.reply_ctx,
+                content: 'original answer after reconnect',
+              }));
+            }, 10);
+          }
           return;
         }
-        if (parsed.type === 'message') {
-          if (sockets.indexOf(socket) === 0) {
-            socket.send(JSON.stringify({
-              type: 'preview_start',
-              ref_id: 'dropped-progress',
-              session_key: parsed.session_key,
-              reply_ctx: parsed.reply_ctx,
-              content: `${progressPrefix}${JSON.stringify({
-                version: 2,
-                state: 'running',
-                items: [{ kind: 'tool_use', tool: 'Bash', text: 'sleep 30' }],
-              })}`,
-            }));
-          } else {
-            socket.send(JSON.stringify({
-              type: 'reply',
-              session_key: parsed.session_key,
-              content: 'reply after dropped connection',
-            }));
-          }
-        }
+        if (parsed.type !== 'message' || sockets.indexOf(socket) !== 0) return;
+        droppedMessage = parsed;
+        socket.send(JSON.stringify({
+          type: 'preview_start',
+          ref_id: 'dropped-progress',
+          session_key: parsed.session_key,
+          reply_ctx: parsed.reply_ctx,
+          content: `${progressPrefix}${JSON.stringify({
+            version: 2,
+            state: 'running',
+            items: [{ kind: 'tool_use', tool: 'Bash', text: 'sleep 30' }],
+          })}`,
+        }));
       });
     });
 
@@ -1019,10 +1022,9 @@ describe('cc-connect BridgePlatform adapter', () => {
             type: 'tool.completed',
             runId: droppedRun.runId,
             toolCallId: `${droppedRun.runId}:progress:0`,
-            isError: true,
             meta: expect.objectContaining({
-              status: 'failed',
-              success: false,
+              status: 'completed',
+              success: true,
               inferredFromRunCompletion: true,
             }),
           })],
@@ -1030,27 +1032,17 @@ describe('cc-connect BridgePlatform adapter', () => {
             type: 'run.ended',
             runId: droppedRun.runId,
             sessionKey: 'agent:coder:feishu:chat-1:user-1',
-            status: 'error',
-            error: 'cc-connect bridge disconnected before the run completed',
-          })],
-        ]));
-      });
-
-      const replacementRun = await adapter.send({
-        sessionKey: 'agent:coder:feishu:chat-1:user-1',
-        message: 'answer after reconnect',
-        idempotencyKey: 'idem-after-drop',
-      });
-      await vi.waitFor(() => {
-        expect(emitted).toEqual(expect.arrayContaining([
-          ['chat:runtime-event', expect.objectContaining({
-            type: 'run.ended',
-            runId: replacementRun.runId,
-            sessionKey: 'agent:coder:feishu:chat-1:user-1',
             status: 'completed',
           })],
         ]));
       });
+      expect(emitted).not.toEqual(expect.arrayContaining([
+        ['chat:runtime-event', expect.objectContaining({
+          type: 'run.ended',
+          runId: droppedRun.runId,
+          status: 'error',
+        })],
+      ]));
 
       await adapter.close();
       const connectionCountAfterClose = sockets.length;

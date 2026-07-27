@@ -7,6 +7,11 @@ const MAX_TOOL_OUTPUT_CHARS = 16_000;
 const TRANSCRIPT_TURN_MATCH_WINDOW_MS = 2 * 60_000;
 const MAX_TRANSCRIPT_FILE_CACHE_ENTRIES = 512;
 const MAX_TRANSCRIPT_PATH_CACHE_ENTRIES = 2_048;
+const MAX_FALLBACK_TURN_HINTS = 20;
+const MAX_FALLBACK_DIRECTORIES = 12;
+const MAX_FALLBACK_CANDIDATE_FILES = 64;
+const MAX_FALLBACK_FILE_BYTES = 8 * 1024 * 1024;
+const MAX_FALLBACK_TOTAL_BYTES = 32 * 1024 * 1024;
 type CachedTranscriptFile = {
   mtimeMs: number;
   size: number;
@@ -211,20 +216,35 @@ async function findTurnTranscriptFiles(
 ): Promise<string[]> {
   const sessionRoot = join(codexHomeDir, 'sessions');
   const directories = new Map<string, string>();
-  for (const hint of hints) {
+  const recentHints = [...hints]
+    .sort((left, right) => right.timestamp - left.timestamp)
+    .slice(0, MAX_FALLBACK_TURN_HINTS);
+  for (const hint of recentHints) {
     for (const parts of transcriptCandidateDateParts(hint.timestamp)) {
       const directory = join(sessionRoot, ...parts);
       directories.set(directory, directory);
+      if (directories.size >= MAX_FALLBACK_DIRECTORIES) break;
     }
+    if (directories.size >= MAX_FALLBACK_DIRECTORIES) break;
   }
   const matches: string[] = [];
+  let candidateFiles = 0;
+  let candidateBytes = 0;
   for (const directory of directories.values()) {
     const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
-    for (const entry of entries) {
-      if (!entry.isFile() || !entry.name.endsWith('.jsonl')) continue;
+    const transcriptEntries = entries
+      .filter((entry) => entry.isFile() && entry.name.endsWith('.jsonl'))
+      .sort((left, right) => right.name.localeCompare(left.name));
+    for (const entry of transcriptEntries) {
+      if (candidateFiles >= MAX_FALLBACK_CANDIDATE_FILES) return matches;
+      candidateFiles += 1;
       const path = join(directory, entry.name);
+      const metadata = await stat(path).catch(() => null);
+      if (!metadata || metadata.size > MAX_FALLBACK_FILE_BYTES) continue;
+      if (candidateBytes + metadata.size > MAX_FALLBACK_TOTAL_BYTES) return matches;
+      candidateBytes += metadata.size;
       const file = await readTranscriptFile(path);
-      if (file?.jsonl && transcriptMatchesTurn(file, hints, expectedWorkDir)) matches.push(path);
+      if (file?.jsonl && transcriptMatchesTurn(file, recentHints, expectedWorkDir)) matches.push(path);
     }
   }
   return matches;
@@ -401,7 +421,9 @@ export async function loadCcConnectCodexTranscriptTools(
           MAX_TRANSCRIPT_PATH_CACHE_ENTRIES,
         );
         const file = await readTranscriptFile(transcriptPath);
-        if (file?.jsonl && transcriptMatchesWorkDir(file, expectedWorkDir)) {
+        const matchesPublicTurn = turnHints.length === 0
+          || (file !== null && transcriptMatchesTurn(file, turnHints, expectedWorkDir));
+        if (file?.jsonl && transcriptMatchesWorkDir(file, expectedWorkDir) && matchesPublicTurn) {
           idMatchedPaths.add(transcriptPath);
         }
       }
