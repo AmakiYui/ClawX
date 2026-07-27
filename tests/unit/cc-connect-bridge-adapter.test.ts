@@ -944,6 +944,7 @@ describe('cc-connect BridgePlatform adapter', () => {
     const sockets: WebSocket[] = [];
     const received: Record<string, unknown>[] = [];
     const emitted: Array<[string, unknown]> = [];
+    const progressPrefix = '__cc_connect_progress_card_v1__:';
 
     server.on('connection', (socket) => {
       sockets.push(socket);
@@ -954,12 +955,26 @@ describe('cc-connect BridgePlatform adapter', () => {
           socket.send(JSON.stringify({ type: 'register_ack', ok: true }));
           return;
         }
-        if (parsed.type === 'message' && sockets.indexOf(socket) === 1) {
-          socket.send(JSON.stringify({
-            type: 'reply',
-            session_key: parsed.session_key,
-            content: 'reply after dropped connection',
-          }));
+        if (parsed.type === 'message') {
+          if (sockets.indexOf(socket) === 0) {
+            socket.send(JSON.stringify({
+              type: 'preview_start',
+              ref_id: 'dropped-progress',
+              session_key: parsed.session_key,
+              reply_ctx: parsed.reply_ctx,
+              content: `${progressPrefix}${JSON.stringify({
+                version: 2,
+                state: 'running',
+                items: [{ kind: 'tool_use', tool: 'Bash', text: 'sleep 30' }],
+              })}`,
+            }));
+          } else {
+            socket.send(JSON.stringify({
+              type: 'reply',
+              session_key: parsed.session_key,
+              content: 'reply after dropped connection',
+            }));
+          }
         }
       });
     });
@@ -986,11 +1001,31 @@ describe('cc-connect BridgePlatform adapter', () => {
         message: 'drop this run',
         idempotencyKey: 'idem-before-drop',
       });
+      await vi.waitFor(() => {
+        expect(emitted).toEqual(expect.arrayContaining([
+          ['chat:runtime-event', expect.objectContaining({
+            type: 'tool.started',
+            runId: droppedRun.runId,
+            toolCallId: `${droppedRun.runId}:progress:0`,
+          })],
+        ]));
+      });
       sockets[0]?.close();
       await vi.waitFor(() => {
         expect(sockets).toHaveLength(2);
         expect(adapter.isConnected()).toBe(true);
         expect(emitted).toEqual(expect.arrayContaining([
+          ['chat:runtime-event', expect.objectContaining({
+            type: 'tool.completed',
+            runId: droppedRun.runId,
+            toolCallId: `${droppedRun.runId}:progress:0`,
+            isError: true,
+            meta: expect.objectContaining({
+              status: 'failed',
+              success: false,
+              inferredFromRunCompletion: true,
+            }),
+          })],
           ['chat:runtime-event', expect.objectContaining({
             type: 'run.ended',
             runId: droppedRun.runId,

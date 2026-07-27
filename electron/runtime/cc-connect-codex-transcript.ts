@@ -309,6 +309,24 @@ export function parseCcConnectCodexTranscriptTools(jsonl: string): RawMessage[] 
         ...(timestamp !== undefined ? { timestamp } : {}),
         stopReason: 'tool_use',
       });
+      const status = typeof payload.status === 'string' ? payload.status.toLowerCase() : '';
+      const isError = ['cancelled', 'error', 'failed'].includes(status);
+      if (status === 'completed' || isError) {
+        const output = isError ? `Web search ${status}` : 'Web search completed';
+        messages.push({
+          id: `cc-connect-codex-tool-result-${callId}`,
+          role: 'toolresult',
+          toolCallId: callId,
+          toolName: name,
+          content: output,
+          details: {
+            status: isError ? 'error' : 'completed',
+            aggregated: output,
+          },
+          ...(isError ? { isError: true } : {}),
+          ...(timestamp !== undefined ? { timestamp } : {}),
+        });
+      }
       continue;
     }
 

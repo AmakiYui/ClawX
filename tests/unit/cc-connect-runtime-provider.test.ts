@@ -2682,6 +2682,7 @@ describe('CcConnectRuntimeProvider', () => {
         payload: {
           type: 'web_search_call',
           id: 'web-search-1',
+          status: 'completed',
           action: { type: 'search', query: 'status' },
         },
       }),
@@ -2728,6 +2729,12 @@ describe('CcConnectRuntimeProvider', () => {
           id: 'web-search-1',
           name: 'Web Search',
         })],
+      }),
+      expect.objectContaining({
+        role: 'toolresult',
+        toolCallId: 'web-search-1',
+        toolName: 'Web Search',
+        content: 'Web search completed',
       }),
       expect.objectContaining({
         role: 'assistant',

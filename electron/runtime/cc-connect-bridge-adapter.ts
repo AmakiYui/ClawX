@@ -1593,6 +1593,7 @@ export class CcConnectBridgeAdapter {
     const failedAt = Date.now();
     for (const pending of Array.from(this.pendingRuns.values())) {
       if (this.pendingRuns.get(pending.runId) !== pending) continue;
+      this.completeOpenProgressTools(pending.runId, true);
       this.abortedRuns.set(pending.runId, {
         sessionKey: pending.sessionKey,
         abortedAt: failedAt,
