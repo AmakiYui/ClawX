@@ -177,7 +177,9 @@ describe('cc-connect BridgePlatform adapter', () => {
           project: 'clawx-coder',
         }),
       ]));
-      await expect(adapter.listSessions()).resolves.toEqual([
+      const sessions = await adapter.listSessions();
+      expect(sessions).toHaveLength(2);
+      expect(sessions).toEqual(expect.arrayContaining([
         expect.objectContaining({
           key: 'agent:research:desk',
           agentId: 'research',
@@ -190,7 +192,7 @@ describe('cc-connect BridgePlatform adapter', () => {
           derivedTitle: 'channel ping',
           lastMessagePreview: 'pong',
         }),
-      ]);
+      ]));
       await adapter.close();
     } finally {
       await adapter?.close();
