@@ -527,7 +527,7 @@ export class CcConnectBridgeAdapter {
     this.shouldReconnect = false;
     this.clearHeartbeat();
     this.clearReconnectTimer();
-    await this.failPendingRuns('cc-connect runtime stopped before the run completed');
+    this.failPendingRuns('cc-connect runtime stopped before the run completed');
     const sockets = new Set([
       ...this.connectingSockets,
       ...(this.socket ? [this.socket] : []),
@@ -841,13 +841,14 @@ export class CcConnectBridgeAdapter {
           }
           return;
         }
-        this.handleServerMessage(parsed);
+        this.handleServerMessage(parsed, socket);
       });
       socket.once('error', (error) => finish(error));
       socket.once('close', () => {
         if (this.socket === socket) {
           this.socket = null;
           this.clearHeartbeat();
+          this.failPendingRuns('cc-connect bridge disconnected before the run completed');
           this.scheduleReconnect();
         }
         finish(new Error('cc-connect bridge connection closed'));
@@ -904,7 +905,8 @@ export class CcConnectBridgeAdapter {
     }
   }
 
-  private handleServerMessage(message: Record<string, unknown>): void {
+  private handleServerMessage(message: Record<string, unknown>, sourceSocket: WebSocket): void {
+    if (sourceSocket !== this.socket) return;
     const progressItems = parseBridgeProgressItems(message.content);
     if (progressItems) {
       logger.debug(
@@ -1587,7 +1589,7 @@ export class CcConnectBridgeAdapter {
     this.terminalCardRuns.delete(pending.runId);
   }
 
-  private async failPendingRuns(error: string): Promise<void> {
+  private failPendingRuns(error: string): void {
     const failedAt = Date.now();
     for (const pending of Array.from(this.pendingRuns.values())) {
       if (this.pendingRuns.get(pending.runId) !== pending) continue;
@@ -1595,7 +1597,7 @@ export class CcConnectBridgeAdapter {
         sessionKey: pending.sessionKey,
         abortedAt: failedAt,
       });
-      await this.finishPendingRun(pending, {
+      void this.finishPendingRun(pending, {
         text: error,
         isError: true,
         appendMessage: false,
@@ -1641,7 +1643,10 @@ export class CcConnectBridgeAdapter {
       pending.sessionKey === sessionKey || toCcConnectBridgeSessionKey(pending.sessionKey) === bridgeSessionKey
     ));
     if (hasPendingForSession) return false;
-    return Array.from(this.abortedRuns.values()).some((aborted) => aborted.sessionKey === sessionKey);
+    return Array.from(this.abortedRuns.values()).some((aborted) => (
+      aborted.sessionKey === sessionKey
+      || toCcConnectBridgeSessionKey(aborted.sessionKey) === bridgeSessionKey
+    ));
   }
 
   private pruneAbortedRuns(): void {

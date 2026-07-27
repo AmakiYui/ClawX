@@ -2609,7 +2609,7 @@ describe('CcConnectRuntimeProvider', () => {
     });
   });
 
-  it('scopes transcript turn matching by workspace and parses direct Web Search and MCP tools', async () => {
+  it('rejects stale cross-workspace session IDs and matches later Web Search and MCP turns', async () => {
     const transcriptDir = join(
       tempDir,
       'runtimes',
@@ -2623,11 +2623,11 @@ describe('CcConnectRuntimeProvider', () => {
     await mkdir(transcriptDir, { recursive: true });
     const timestamp = Date.parse('2026-07-27T06:30:10.000Z');
     const sessionMeta = (id: string, cwd: string) => JSON.stringify({
-      timestamp: '2026-07-27T06:30:10.000Z',
+      timestamp: '2026-07-27T06:00:10.000Z',
       type: 'session_meta',
       payload: {
         id,
-        timestamp: '2026-07-27T06:30:10.000Z',
+        timestamp: '2026-07-27T06:00:10.000Z',
         cwd,
       },
     });
@@ -2665,7 +2665,7 @@ describe('CcConnectRuntimeProvider', () => {
         },
       }),
     ].join('\n'), 'utf8');
-    await writeFile(join(transcriptDir, 'rollout-main.jsonl'), [
+    await writeFile(join(transcriptDir, 'rollout-main-session.jsonl'), [
       sessionMeta('main-session', '/workspace/main'),
       userMessage,
       JSON.stringify({
@@ -2683,7 +2683,7 @@ describe('CcConnectRuntimeProvider', () => {
     const { loadCcConnectCodexTranscriptTools } = await import('@electron/runtime/cc-connect-codex-transcript');
     const messages = await loadCcConnectCodexTranscriptTools(
       join(tempDir, 'runtimes', 'cc-connect', 'codex-home'),
-      '',
+      'main-session',
       [{ content: '查一下状态', timestamp }],
       '/workspace/coder',
     );

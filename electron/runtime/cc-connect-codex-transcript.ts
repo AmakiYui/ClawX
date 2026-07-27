@@ -14,7 +14,10 @@ type CachedTranscriptFile = {
   turnMetadata?: {
     sessionTimestamp?: number;
     sessionWorkDir?: string;
-    userMessages: string[];
+    userTurns: Array<{
+      content: string;
+      timestamp?: number;
+    }>;
   };
   toolMessages?: RawMessage[];
 };
@@ -166,7 +169,7 @@ function transcriptTurnMetadata(file: CachedTranscriptFile): NonNullable<CachedT
   if (file.turnMetadata) return file.turnMetadata;
   let sessionTimestamp: number | undefined;
   let sessionWorkDir: string | undefined;
-  const userMessages: string[] = [];
+  const userTurns: NonNullable<CachedTranscriptFile['turnMetadata']>['userTurns'] = [];
   for (const line of file.jsonl.split(/\r?\n/)) {
     if (!line.trim()) continue;
     let record: Record<string, unknown>;
@@ -185,13 +188,23 @@ function transcriptTurnMetadata(file: CachedTranscriptFile): NonNullable<CachedT
     if (record.type !== 'response_item' || !isRecord(record.payload)) continue;
     const payload = record.payload;
     if (payload.type !== 'message' || payload.role !== 'user' || !Array.isArray(payload.content)) continue;
+    const timestamp = parseTimestamp(record.timestamp) ?? sessionTimestamp;
     for (const item of payload.content) {
       if (!isRecord(item) || item.type !== 'input_text' || typeof item.text !== 'string') continue;
-      userMessages.push(item.text.trim());
+      userTurns.push({
+        content: item.text.trim(),
+        ...(timestamp !== undefined ? { timestamp } : {}),
+      });
     }
   }
-  file.turnMetadata = { sessionTimestamp, sessionWorkDir, userMessages };
+  file.turnMetadata = { sessionTimestamp, sessionWorkDir, userTurns };
   return file.turnMetadata;
+}
+
+function transcriptMatchesWorkDir(file: CachedTranscriptFile, expectedWorkDir?: string): boolean {
+  if (!expectedWorkDir) return true;
+  const { sessionWorkDir } = transcriptTurnMetadata(file);
+  return sessionWorkDir !== undefined && resolve(sessionWorkDir) === resolve(expectedWorkDir);
 }
 
 function transcriptMatchesTurn(
@@ -199,15 +212,13 @@ function transcriptMatchesTurn(
   hints: CcConnectTranscriptTurnHint[],
   expectedWorkDir?: string,
 ): boolean {
-  const { sessionTimestamp, sessionWorkDir, userMessages } = transcriptTurnMetadata(file);
-  if (sessionTimestamp === undefined || userMessages.length === 0) return false;
-  if (expectedWorkDir && (!sessionWorkDir || resolve(sessionWorkDir) !== resolve(expectedWorkDir))) {
-    return false;
-  }
-  return hints.some((hint) => (
-    Math.abs(sessionTimestamp - hint.timestamp) <= TRANSCRIPT_TURN_MATCH_WINDOW_MS
-    && userMessages.includes(hint.content.trim())
-  ));
+  const { userTurns } = transcriptTurnMetadata(file);
+  if (userTurns.length === 0 || !transcriptMatchesWorkDir(file, expectedWorkDir)) return false;
+  return hints.some((hint) => userTurns.some((turn) => (
+    turn.timestamp !== undefined
+    && Math.abs(turn.timestamp - hint.timestamp) <= TRANSCRIPT_TURN_MATCH_WINDOW_MS
+    && turn.content === hint.content.trim()
+  )));
 }
 
 async function findTurnTranscriptFiles(
@@ -374,21 +385,24 @@ export async function loadCcConnectCodexTranscriptTools(
     ? [codexHomeDirs]
     : Array.from(codexHomeDirs);
   const transcriptPaths = new Set<string>();
-  const cachedSessionPath = hasValidAgentSessionId
-    ? transcriptPathBySessionId.get(agentSessionId)
-    : undefined;
-  if (cachedSessionPath) transcriptPaths.add(cachedSessionPath);
   for (const codexHomeDir of new Set(homes.filter(Boolean))) {
-    if (hasValidAgentSessionId && !transcriptPathBySessionId.has(agentSessionId)) {
-      const transcriptPath = await findTranscriptFile(join(codexHomeDir, 'sessions'), agentSessionId);
+    if (hasValidAgentSessionId) {
+      const sessionPathCacheKey = `${resolve(codexHomeDir)}\0${agentSessionId}`;
+      let transcriptPath = transcriptPathBySessionId.get(sessionPathCacheKey);
+      if (!transcriptPath) {
+        transcriptPath = await findTranscriptFile(join(codexHomeDir, 'sessions'), agentSessionId);
+      }
       if (transcriptPath) {
         setBoundedCache(
           transcriptPathBySessionId,
-          agentSessionId,
+          sessionPathCacheKey,
           transcriptPath,
           MAX_TRANSCRIPT_PATH_CACHE_ENTRIES,
         );
-        transcriptPaths.add(transcriptPath);
+        const file = await readTranscriptFile(transcriptPath);
+        if (file?.jsonl && transcriptMatchesWorkDir(file, expectedWorkDir)) {
+          transcriptPaths.add(transcriptPath);
+        }
       }
     }
     for (const turnTranscriptPath of await findTurnTranscriptFiles(codexHomeDir, turnHints, expectedWorkDir)) {
