@@ -2556,8 +2556,19 @@ describe('CcConnectRuntimeProvider', () => {
       updatedAt: Date.parse('2026-07-27T06:20:22.818Z'),
       agentSessionId: staleAgentSessionId,
     };
+    const guiSession = {
+      projectName: 'clawx-main',
+      agentId: 'main',
+      id: 's1',
+      sessionKey: 'main',
+      logicalKey: 'agent:main:main',
+      active: true,
+      createdAt: channelSession.createdAt,
+      updatedAt: channelSession.updatedAt,
+      agentSessionId,
+    };
     const sessionApi = createSessionApiMock({
-      sessions: () => [channelSession],
+      sessions: () => [channelSession, guiSession],
       histories: {
         [channelSession.logicalKey]: [{
           id: 'channel-user',
@@ -2570,6 +2581,17 @@ describe('CcConnectRuntimeProvider', () => {
           content: '我在本机 workspace',
           timestamp: channelSession.updatedAt,
         }],
+        [guiSession.logicalKey]: [{
+          id: 'gui-user',
+          role: 'user',
+          content: '你在哪',
+          timestamp: guiSession.createdAt,
+        }, {
+          id: 'gui-assistant',
+          role: 'assistant',
+          content: 'GUI public history remains authoritative',
+          timestamp: guiSession.updatedAt,
+        }],
       },
     });
     const bridgeAdapter = createBridgeAdapterMock({
@@ -2581,6 +2603,17 @@ describe('CcConnectRuntimeProvider', () => {
       sessionApi: sessionApi as never,
       skillSyncer: vi.fn(async () => ({ skills: [] })),
       providerProfileLoader: vi.fn(async () => createProviderProfile()) as never,
+    });
+
+    await expect(provider.loadHistory({
+      sessionKey: guiSession.logicalKey,
+      limit: 20,
+    })).resolves.toEqual({
+      success: true,
+      messages: [
+        expect.objectContaining({ id: 'gui-user', role: 'user' }),
+        expect.objectContaining({ id: 'gui-assistant', role: 'assistant' }),
+      ],
     });
 
     await expect(provider.loadHistory({
@@ -2640,7 +2673,7 @@ describe('CcConnectRuntimeProvider', () => {
         content: [{ type: 'input_text', text: '查一下状态' }],
       },
     });
-    await writeFile(join(transcriptDir, 'rollout-coder.jsonl'), [
+    await writeFile(join(transcriptDir, 'rollout-2026-07-27T06-00-10-coder.jsonl'), [
       sessionMeta('coder-session', '/workspace/coder'),
       userMessage,
       JSON.stringify({
@@ -2710,6 +2743,79 @@ describe('CcConnectRuntimeProvider', () => {
       }),
     ]);
     expect(JSON.stringify(messages)).not.toContain('should-not-leak');
+  });
+
+  it('rejects ambiguous turn-matched transcript fallback candidates', async () => {
+    const transcriptDir = join(
+      tempDir,
+      'runtimes',
+      'cc-connect',
+      'codex-home',
+      'sessions',
+      '2026',
+      '07',
+      '27',
+    );
+    await mkdir(transcriptDir, { recursive: true });
+    const turnTimestamp = Date.parse('2026-07-27T06:30:10.100Z');
+    const transcript = (id: string, callId: string) => [
+      JSON.stringify({
+        timestamp: '2026-07-27T06:00:10.000Z',
+        type: 'session_meta',
+        payload: {
+          id,
+          timestamp: '2026-07-27T06:00:10.000Z',
+          cwd: '/workspace/coder',
+        },
+      }),
+      JSON.stringify({
+        timestamp: '2026-07-27T06:30:10.100Z',
+        type: 'response_item',
+        payload: {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: 'yes' }],
+        },
+      }),
+      JSON.stringify({
+        timestamp: '2026-07-27T06:30:11.000Z',
+        type: 'response_item',
+        payload: {
+          type: 'function_call',
+          call_id: callId,
+          name: 'exec_command',
+          arguments: `{"cmd":"${id}"}`,
+        },
+      }),
+    ].join('\n');
+    await Promise.all([
+      writeFile(
+        join(transcriptDir, 'rollout-2026-07-27T06-00-10-first-session.jsonl'),
+        transcript('first-session', 'first-call'),
+        'utf8',
+      ),
+      writeFile(
+        join(transcriptDir, 'rollout-2026-07-27T06-05-10-second-session.jsonl'),
+        transcript('second-session', 'second-call'),
+        'utf8',
+      ),
+    ]);
+
+    const { loadCcConnectCodexTranscriptTools } = await import('@electron/runtime/cc-connect-codex-transcript');
+    await expect(loadCcConnectCodexTranscriptTools(
+      join(tempDir, 'runtimes', 'cc-connect', 'codex-home'),
+      '',
+      [{ content: 'yes', timestamp: turnTimestamp }],
+      '/workspace/coder',
+    )).resolves.toEqual([]);
+    const idMatchedMessages = await loadCcConnectCodexTranscriptTools(
+      join(tempDir, 'runtimes', 'cc-connect', 'codex-home'),
+      'first-session',
+      [{ content: 'yes', timestamp: turnTimestamp }],
+      '/workspace/coder',
+    );
+    expect(JSON.stringify(idMatchedMessages)).toContain('first-call');
+    expect(JSON.stringify(idMatchedMessages)).not.toContain('second-call');
   });
 
   it('aborts active cc-connect chat runs through Bridge without restarting the runtime', async () => {

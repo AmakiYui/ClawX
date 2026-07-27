@@ -148,23 +148,6 @@ function transcriptCandidateDateParts(timestamp: number): Array<[string, string,
   return Array.from(new Map(candidates.map((parts) => [parts.join('/'), parts])).values());
 }
 
-function transcriptFilenameTimestamps(fileName: string): number[] {
-  const match = fileName.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})/);
-  if (!match) return [];
-  const [, year, month, day, hour, minute, second] = match.map(Number);
-  return [
-    new Date(year, month - 1, day, hour, minute, second).getTime(),
-    Date.UTC(year, month - 1, day, hour, minute, second),
-  ];
-}
-
-function transcriptFilenameMayMatch(fileName: string, hints: CcConnectTranscriptTurnHint[]): boolean {
-  const timestamps = transcriptFilenameTimestamps(fileName);
-  return timestamps.length === 0 || hints.some((hint) => (
-    timestamps.some((timestamp) => Math.abs(timestamp - hint.timestamp) <= TRANSCRIPT_TURN_MATCH_WINDOW_MS)
-  ));
-}
-
 function transcriptTurnMetadata(file: CachedTranscriptFile): NonNullable<CachedTranscriptFile['turnMetadata']> {
   if (file.turnMetadata) return file.turnMetadata;
   let sessionTimestamp: number | undefined;
@@ -239,7 +222,6 @@ async function findTurnTranscriptFiles(
     const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
     for (const entry of entries) {
       if (!entry.isFile() || !entry.name.endsWith('.jsonl')) continue;
-      if (!transcriptFilenameMayMatch(entry.name, hints)) continue;
       const path = join(directory, entry.name);
       const file = await readTranscriptFile(path);
       if (file?.jsonl && transcriptMatchesTurn(file, hints, expectedWorkDir)) matches.push(path);
@@ -384,8 +366,9 @@ export async function loadCcConnectCodexTranscriptTools(
   const homes = typeof codexHomeDirs === 'string'
     ? [codexHomeDirs]
     : Array.from(codexHomeDirs);
-  const transcriptPaths = new Set<string>();
-  for (const codexHomeDir of new Set(homes.filter(Boolean))) {
+  const uniqueHomes = Array.from(new Set(homes.filter(Boolean)));
+  const idMatchedPaths = new Set<string>();
+  for (const codexHomeDir of uniqueHomes) {
     if (hasValidAgentSessionId) {
       const sessionPathCacheKey = `${resolve(codexHomeDir)}\0${agentSessionId}`;
       let transcriptPath = transcriptPathBySessionId.get(sessionPathCacheKey);
@@ -401,13 +384,22 @@ export async function loadCcConnectCodexTranscriptTools(
         );
         const file = await readTranscriptFile(transcriptPath);
         if (file?.jsonl && transcriptMatchesWorkDir(file, expectedWorkDir)) {
-          transcriptPaths.add(transcriptPath);
+          idMatchedPaths.add(transcriptPath);
         }
       }
     }
-    for (const turnTranscriptPath of await findTurnTranscriptFiles(codexHomeDir, turnHints, expectedWorkDir)) {
-      transcriptPaths.add(turnTranscriptPath);
+  }
+  let transcriptPaths = new Set<string>();
+  if (idMatchedPaths.size === 1) {
+    transcriptPaths = idMatchedPaths;
+  } else if (idMatchedPaths.size === 0) {
+    const fallbackPaths = new Set<string>();
+    for (const codexHomeDir of uniqueHomes) {
+      for (const path of await findTurnTranscriptFiles(codexHomeDir, turnHints, expectedWorkDir)) {
+        fallbackPaths.add(path);
+      }
     }
+    if (fallbackPaths.size === 1) transcriptPaths = fallbackPaths;
   }
   const messages: RawMessage[] = [];
   for (const transcriptPath of transcriptPaths) {

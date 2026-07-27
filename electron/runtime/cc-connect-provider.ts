@@ -840,20 +840,23 @@ export class CcConnectRuntimeProvider extends EventEmitter implements RuntimePro
       return { success: false, error: 'Session not found' };
     }
     const publicMessages = await this.sessionApi.loadHistory(session);
-    const codexHomeDirs = new Set([
-      this.currentProjectProfileByAgent.get(session.agentId)?.codexHomeDir,
-      this.currentProviderProfile?.codexHomeDir,
-      ...this.currentProjectProfiles.map((profile) => profile.codexHomeDir),
-      getCcConnectCodexHomeDir(),
-    ].filter((value): value is string => Boolean(value)));
-    const transcriptTurnHints = publicMessages.slice(-limit).flatMap((message) => {
-      const content = message.role === 'user' ? runtimeMessageText(message.content) : '';
-      return content && typeof message.timestamp === 'number'
-        ? [{ content, timestamp: message.timestamp }]
-        : [];
-    });
-    const transcriptMessages = session.agentSessionId || transcriptTurnHints.length > 0
-      ? await loadCcConnectCodexTranscriptTools(
+    const channel = ccConnectSessionChannel(session.logicalKey);
+    let transcriptMessages: RawMessage[] = [];
+    if (channel) {
+      const codexHomeDirs = new Set([
+        this.currentProjectProfileByAgent.get(session.agentId)?.codexHomeDir,
+        this.currentProviderProfile?.codexHomeDir,
+        ...this.currentProjectProfiles.map((profile) => profile.codexHomeDir),
+        getCcConnectCodexHomeDir(),
+      ].filter((value): value is string => Boolean(value)));
+      const transcriptTurnHints = publicMessages.slice(-limit).flatMap((message) => {
+        const content = message.role === 'user' ? runtimeMessageText(message.content) : '';
+        return content && typeof message.timestamp === 'number'
+          ? [{ content, timestamp: message.timestamp }]
+          : [];
+      });
+      if (session.agentSessionId || transcriptTurnHints.length > 0) {
+        transcriptMessages = await loadCcConnectCodexTranscriptTools(
           codexHomeDirs,
           session.agentSessionId ?? '',
           transcriptTurnHints,
@@ -861,12 +864,14 @@ export class CcConnectRuntimeProvider extends EventEmitter implements RuntimePro
         ).catch((error) => {
           logger.warn('[cc-connect] failed to load Codex tool history', {
             sessionKey,
+            channel,
             agentSessionId: session.agentSessionId,
             error: error instanceof Error ? error.message : String(error),
           });
           return [];
-        })
-      : [];
+        });
+      }
+    }
     const bridgeMessages = await this.bridgeAdapter.loadHistory(sessionKey, limit);
     const messages = mergeCcConnectHistory(
       mergeCcConnectHistory(publicMessages, transcriptMessages),
