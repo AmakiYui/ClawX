@@ -36,10 +36,13 @@ describe('cc-connect BridgePlatform adapter', () => {
     expect(toCcConnectBridgeSessionKey('agent:main:main')).toBe('clawx:main:main');
     expect(toCcConnectBridgeSessionKey('agent:research:desk')).toBe('clawx:research:desk');
     expect(toCcConnectBridgeSessionKey('agent:main:cron:job-123')).toBe('clawx:main:cron:job-123');
+    expect(toCcConnectBridgeSessionKey('agent:research:feishu:chat-1:user-1')).toBe('feishu:chat-1:user-1');
+    expect(toCcConnectBridgeSessionKey('agent:research:feishu:chat-1:user-1:$session:s2')).toBe('feishu:chat-1:user-1');
     expect(toCcConnectBridgeSessionKey('clawx:main:main')).toBe('clawx:main:main');
     expect(toCcConnectBridgeSessionKey('feishu:chat-1:user-1')).toBe('feishu:chat-1:user-1');
     expect(ccConnectProjectNameForSessionKey('agent:research:desk')).toBe('clawx-research');
     expect(ccConnectProjectNameForSessionKey('agent:research:cron:job-123')).toBe('clawx-research');
+    expect(ccConnectProjectNameForSessionKey('agent:research:feishu:chat-1:user-1')).toBe('clawx-research');
     expect(ccConnectProjectNameForSessionKey('feishu:chat-1:user-1')).toBe('clawx-main');
   });
 
@@ -129,6 +132,11 @@ describe('cc-connect BridgePlatform adapter', () => {
         message: 'ping',
         idempotencyKey: 'idem-1',
       })).resolves.toEqual(expect.objectContaining({ runId: expect.stringMatching(/^cc-connect-/) }));
+      await expect(adapter.send({
+        sessionKey: 'agent:coder:feishu:chat-1:user-1',
+        message: 'channel ping',
+        idempotencyKey: 'idem-2',
+      })).resolves.toEqual(expect.objectContaining({ runId: expect.stringMatching(/^cc-connect-/) }));
 
       await vi.waitFor(() => {
         expect(emitted).toEqual(expect.arrayContaining([
@@ -155,12 +163,23 @@ describe('cc-connect BridgePlatform adapter', () => {
           session_key: 'clawx:research:desk',
           project: 'clawx-research',
         }),
+        expect.objectContaining({
+          type: 'message',
+          session_key: 'feishu:chat-1:user-1',
+          project: 'clawx-coder',
+        }),
       ]));
       await expect(adapter.listSessions()).resolves.toEqual([
         expect.objectContaining({
           key: 'agent:research:desk',
           agentId: 'research',
           derivedTitle: 'ping',
+          lastMessagePreview: 'pong',
+        }),
+        expect.objectContaining({
+          key: 'agent:coder:feishu:chat-1:user-1',
+          agentId: 'coder',
+          derivedTitle: 'channel ping',
           lastMessagePreview: 'pong',
         }),
       ]);
@@ -953,6 +972,82 @@ describe('cc-connect BridgePlatform adapter', () => {
       await new Promise((resolve) => setTimeout(resolve, 80));
       expect(sockets).toHaveLength(connectionCountAfterClose);
       expect(adapter.isConnected()).toBe(false);
+    } finally {
+      await adapter.close();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('ends pending runs on close so they cannot block reply routing after reconnect', async () => {
+    const server = new WebSocketServer({ port: 0 });
+    const port = await new Promise<number>((resolve) => {
+      server.once('listening', () => {
+        const address = server.address();
+        resolve(typeof address === 'object' && address ? address.port : 0);
+      });
+    });
+    const emitted: Array<[string, unknown]> = [];
+    let sentMessages = 0;
+
+    server.on('connection', (socket) => {
+      socket.on('message', (data) => {
+        const parsed = JSON.parse(String(data)) as Record<string, unknown>;
+        if (parsed.type === 'register') {
+          socket.send(JSON.stringify({ type: 'register_ack', ok: true }));
+          return;
+        }
+        if (parsed.type !== 'message') return;
+        sentMessages += 1;
+        if (sentMessages === 2) {
+          socket.send(JSON.stringify({
+            type: 'reply',
+            session_key: parsed.session_key,
+            content: 'reply after reconnect',
+          }));
+        }
+      });
+    });
+
+    const adapter = new CcConnectBridgeAdapter({
+      port,
+      token: 'token',
+      project: 'clawx-main',
+      emit: ((event: string, payload: unknown) => emitted.push([event, payload])) as never,
+    });
+
+    try {
+      const first = await adapter.send({
+        sessionKey: 'agent:main:first',
+        message: 'never answered',
+        idempotencyKey: 'idem-before-close',
+      });
+      await adapter.close();
+
+      expect(emitted).toEqual(expect.arrayContaining([
+        ['chat:runtime-event', expect.objectContaining({
+          type: 'run.ended',
+          runId: first.runId,
+          sessionKey: 'agent:main:first',
+          status: 'error',
+          error: 'cc-connect runtime stopped before the run completed',
+        })],
+      ]));
+
+      const second = await adapter.send({
+        sessionKey: 'agent:main:second',
+        message: 'answer this',
+        idempotencyKey: 'idem-after-close',
+      });
+      await vi.waitFor(() => {
+        expect(emitted).toEqual(expect.arrayContaining([
+          ['chat:runtime-event', expect.objectContaining({
+            type: 'run.ended',
+            runId: second.runId,
+            sessionKey: 'agent:main:second',
+            status: 'completed',
+          })],
+        ]));
+      });
     } finally {
       await adapter.close();
       await new Promise<void>((resolve) => server.close(() => resolve()));
