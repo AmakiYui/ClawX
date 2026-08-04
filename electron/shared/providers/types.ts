@@ -97,6 +97,7 @@ export function assertValidApiProtocol(
 }
 
 export type ProviderProtocol = OpenClawApiProtocol;
+export type ProviderReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
 
 export type ProviderAuthMode =
   | 'api_key'
@@ -118,6 +119,8 @@ export interface ProviderConfig {
   apiProtocol?: ProviderProtocol;
   headers?: Record<string, string>;
   model?: string;
+  reasoningEnabled?: boolean;
+  reasoningEfforts?: ProviderReasoningEffort[];
   fallbackModels?: string[];
   fallbackProviderIds?: string[];
   enabled: boolean;
@@ -182,6 +185,8 @@ export interface ProviderAccount {
   apiProtocol?: ProviderProtocol;
   headers?: Record<string, string>;
   model?: string;
+  reasoningEnabled?: boolean;
+  reasoningEfforts?: ProviderReasoningEffort[];
   fallbackModels?: string[];
   fallbackAccountIds?: string[];
   enabled: boolean;

@@ -6,7 +6,6 @@ import {
   LOCAL_MODEL_CONTEXT_WINDOW,
   inferCustomModelContextWindow,
   inferCustomModelInputModalities,
-  inferCustomModelReasoningCapabilities,
 } from '@electron/shared/providers/model-capabilities';
 
 describe('inferCustomModelInputModalities', () => {
@@ -160,33 +159,5 @@ describe('inferCustomModelContextWindow', () => {
         apiProtocol: 'anthropic-messages',
       })).toBe(524_288);
     });
-  });
-});
-
-describe('inferCustomModelReasoningCapabilities', () => {
-  it.each([
-    'glm-5.2',
-    'vendor/glm-5.3',
-    'gpt-5.5',
-    'openai/gpt-5.6-sol',
-  ])('exposes the standard effort ladder for hosted model %s', (modelId) => {
-    expect(inferCustomModelReasoningCapabilities(modelId, {
-      providerKey: 'custom-a1b2c3d4',
-      apiProtocol: 'openai-completions',
-    })).toEqual({
-      reasoning: true,
-      compat: {
-        supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
-      },
-    });
-  });
-
-  it.each([
-    ['glm-5.1', 'custom-a1b2c3d4', 'openai-completions'],
-    ['unknown-private-model', 'custom-a1b2c3d4', 'openai-completions'],
-    ['glm-5.2', 'ollama-a1b2c3d4', 'openai-completions'],
-    ['glm-5.2', 'custom-a1b2c3d4', 'anthropic-messages'],
-  ])('does not invent reasoning controls for %s on %s / %s', (modelId, providerKey, apiProtocol) => {
-    expect(inferCustomModelReasoningCapabilities(modelId, { providerKey, apiProtocol })).toBeUndefined();
   });
 });

@@ -327,7 +327,26 @@ async function syncRuntimeProviderConfig(
     api: context.api,
     apiKeyEnv: context.meta?.apiKeyEnv,
     headers: config.headers ?? context.meta?.headers,
+    ...(config.type === 'custom'
+      ? {
+        reasoningEnabled: config.reasoningEnabled === true,
+        reasoningEfforts: config.reasoningEfforts ?? [],
+      }
+      : {}),
   });
+}
+
+function customProviderModelEntry(config: ProviderConfig, modelId: string) {
+  const entry: ReturnType<typeof piAiModelsJsonModelEntry> & Record<string, unknown> = {
+    ...piAiModelsJsonModelEntry(modelId),
+    reasoning: config.reasoningEnabled === true,
+  };
+  if (config.reasoningEnabled === true) {
+    entry.compat = {
+      supportedReasoningEfforts: [...(config.reasoningEfforts ?? [])],
+    };
+  }
+  return entry;
 }
 
 async function syncCustomProviderAgentModel(
@@ -348,7 +367,7 @@ async function syncCustomProviderAgentModel(
   await updateAgentModelProvider(runtimeProviderKey, {
     baseUrl: normalizeProviderBaseUrl(config, config.baseUrl, config.apiProtocol || 'openai-completions'),
     api: config.apiProtocol || 'openai-completions',
-    models: modelId ? [piAiModelsJsonModelEntry(modelId)] : [],
+    models: modelId ? [customProviderModelEntry(config, modelId)] : [],
     apiKey: resolvedKey,
   });
 }
@@ -476,7 +495,9 @@ async function buildAgentModelProviderEntry(
   return {
     baseUrl,
     api,
-    models: [piAiModelsJsonModelEntry(modelId)],
+    models: [config.type === 'custom'
+      ? customProviderModelEntry(config, modelId)
+      : piAiModelsJsonModelEntry(modelId)],
     apiKey,
     authHeader,
   };

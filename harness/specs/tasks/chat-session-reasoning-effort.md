@@ -29,8 +29,9 @@ touchedAreas:
 expectedUserBehavior:
   - The Chat model button shows the effective reasoning effort for the current session.
   - The model menu offers only the thinking levels advertised by OpenClaw for the resolved model.
+  - Reasoning effort opens in a dedicated submenu with a current-session Thinking toggle.
   - Selecting a level persists an explicit current-session override through Gateway sessions.patch.
-  - Selecting the inherited option clears the override and displays the Gateway-resolved default.
+  - Disabling Thinking patches the explicit off level; enabling it restores the prior selection or runtime default.
   - A message cannot be sent while an effort change is still being applied.
 requiredProfiles:
   - fast
@@ -54,7 +55,7 @@ requiredTests:
 acceptance:
   - Renderer uses the typed host-api Gateway RPC boundary and never opens its own Gateway transport.
   - thinkingLevels, thinkingDefault, and thinkingLevel remain Gateway-owned session metadata.
-  - Recognized hosted custom-provider reasoning models receive missing OpenClaw capability metadata without replacing explicit user/runtime values.
+  - Custom-provider reasoning levels come only from explicit user-owned OpenClaw capability metadata.
   - Explicit off is distinct from a cleared override.
   - Failed patches restore the prior session state and leave the message available to send.
   - New labels are localized in English, Chinese, Japanese, and Russian.

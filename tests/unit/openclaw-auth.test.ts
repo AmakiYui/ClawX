@@ -939,7 +939,7 @@ describe('syncProviderConfigToOpenClaw', () => {
         id: 'model-a',
         name: 'Model A',
         input: ['text', 'image'],
-        reasoning: true,
+        reasoning: false,
         contextWindow: 200000,
         customField: 'keep-me',
       }),
@@ -964,11 +964,12 @@ describe('syncProviderConfigToOpenClaw', () => {
       expect.objectContaining({
         id: 'private-model-x',
         input: ['text'],
+        reasoning: false,
       }),
     ]);
   });
 
-  it('writes an inferred contextWindow for new custom-provider model rows', async () => {
+  it('keeps reasoning disabled by default on new custom-provider model rows', async () => {
     await writeOpenClawJson({ models: { providers: {} } });
 
     const { syncProviderConfigToOpenClaw } = await import('@electron/utils/openclaw-auth');
@@ -986,15 +987,13 @@ describe('syncProviderConfigToOpenClaw', () => {
       expect.objectContaining({
         id: 'gpt-5.5',
         contextWindow: 1000000,
-        reasoning: true,
-        compat: {
-          supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
-        },
+        reasoning: false,
       }),
     ]);
+    expect(models[0]).not.toHaveProperty('compat');
   });
 
-  it('backfills the reasoning effort ladder on an existing GLM-5.2 custom model', async () => {
+  it('writes user-selected reasoning efforts on the primary custom model', async () => {
     await writeOpenClawJson({
       models: {
         providers: {
@@ -1002,7 +1001,13 @@ describe('syncProviderConfigToOpenClaw', () => {
             baseUrl: 'https://example.com/v1',
             api: 'openai-completions',
             models: [
-              { id: 'glm-5.2', name: 'glm-5.2', input: ['text'], contextWindow: 1000000 },
+              {
+                id: 'glm-5.2',
+                name: 'glm-5.2',
+                input: ['text'],
+                contextWindow: 1000000,
+                compat: { customFlag: true },
+              },
             ],
           },
         },
@@ -1013,6 +1018,8 @@ describe('syncProviderConfigToOpenClaw', () => {
     await syncProviderConfigToOpenClaw('custom-example', 'glm-5.2', {
       baseUrl: 'https://example.com/v1',
       api: 'openai-completions',
+      reasoningEnabled: true,
+      reasoningEfforts: ['low', 'high'],
     });
 
     const result = await readOpenClawJson();
@@ -1025,13 +1032,26 @@ describe('syncProviderConfigToOpenClaw', () => {
         id: 'glm-5.2',
         reasoning: true,
         compat: {
-          supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
+          customFlag: true,
+          supportedReasoningEfforts: ['low', 'high'],
         },
       }),
     ]);
   });
 
-  it('preserves an explicit non-reasoning override on a custom model', async () => {
+  it('rejects enabled reasoning without a selected effort', async () => {
+    await writeOpenClawJson({ models: { providers: {} } });
+
+    const { syncProviderConfigToOpenClaw } = await import('@electron/utils/openclaw-auth');
+    await expect(syncProviderConfigToOpenClaw('custom-example', 'glm-5.2', {
+      baseUrl: 'https://example.com/v1',
+      api: 'openai-completions',
+      reasoningEnabled: true,
+      reasoningEfforts: [],
+    })).rejects.toThrow('At least one reasoning effort is required');
+  });
+
+  it('disables reasoning and clears only its effort list', async () => {
     await writeOpenClawJson({
       models: {
         providers: {
@@ -1039,7 +1059,16 @@ describe('syncProviderConfigToOpenClaw', () => {
             baseUrl: 'https://example.com/v1',
             api: 'openai-completions',
             models: [
-              { id: 'glm-5.2', name: 'glm-5.2', reasoning: false, contextWindow: 1000000 },
+              {
+                id: 'glm-5.2',
+                name: 'glm-5.2',
+                reasoning: true,
+                contextWindow: 1000000,
+                compat: {
+                  customFlag: true,
+                  supportedReasoningEfforts: ['low', 'medium', 'high'],
+                },
+              },
             ],
           },
         },
@@ -1050,6 +1079,8 @@ describe('syncProviderConfigToOpenClaw', () => {
     await syncProviderConfigToOpenClaw('custom-example', 'glm-5.2', {
       baseUrl: 'https://example.com/v1',
       api: 'openai-completions',
+      reasoningEnabled: false,
+      reasoningEfforts: [],
     });
 
     const result = await readOpenClawJson();
@@ -1057,8 +1088,11 @@ describe('syncProviderConfigToOpenClaw', () => {
     const entry = providers['custom-example'] as Record<string, unknown>;
     const models = entry.models as Array<Record<string, unknown>>;
 
-    expect(models[0]).toMatchObject({ id: 'glm-5.2', reasoning: false });
-    expect(models[0]).not.toHaveProperty('compat');
+    expect(models[0]).toMatchObject({
+      id: 'glm-5.2',
+      reasoning: false,
+      compat: { customFlag: true },
+    });
   });
 
   it('does not overwrite an existing contextWindow on re-sync', async () => {

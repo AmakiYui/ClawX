@@ -14,6 +14,7 @@ test.describe('ClawX chat model picker', () => {
         let currentModelRef = refs.alphaModelRef;
         let currentThinkingLevel: string | null = null;
         const thinkingLevels = [
+          { id: 'off', label: 'Off' },
           { id: 'low', label: 'Low' },
           { id: 'medium', label: 'Medium' },
           { id: 'high', label: 'High' },
@@ -282,12 +283,22 @@ test.describe('ClawX chat model picker', () => {
       await expect(page.getByTestId('chat-model-picker-menu')).toContainText('kimi-k2.7 (Moonshot)');
       await expect(page.getByTestId('chat-model-picker-menu')).not.toContainText('kimi-k2.6 (Moonshot)');
       await expect(page.getByTestId('chat-model-picker-menu')).not.toContainText('moonshot/kimi-k2.7 (Moonshot)');
+      await page.getByTestId('chat-model-picker-menu').getByRole('button', { name: 'gpt-5.6 (OpenAI)' }).click();
+      await expect(page.getByTestId('chat-model-picker-button')).not.toContainText('Medium');
+      await page.getByTestId('chat-model-picker-button').click();
+      await expect(page.getByTestId('chat-reasoning-effort-menu-trigger')).toHaveCount(0);
       await page.getByTestId('chat-model-picker-menu').getByRole('button', { name: 'provider/model-beta (Beta)' }).click();
       await expect(page.getByTestId('chat-model-picker-button')).toContainText('provider/model-beta (Beta)');
       await page.getByTestId('chat-model-picker-button').click();
+      await page.getByTestId('chat-reasoning-effort-menu-trigger').click();
       await expect(page.getByTestId('chat-model-picker-menu')).toContainText('Extra High');
       await page.getByTestId('chat-reasoning-effort-option-xhigh').click();
       await expect(page.getByTestId('chat-model-picker-button')).toContainText('provider/model-beta (Beta) · Extra High');
+      await page.getByTestId('chat-model-picker-button').click();
+      await page.getByTestId('chat-reasoning-effort-menu-trigger').click();
+      await expect(page.getByTestId('chat-thinking-toggle')).toBeChecked();
+      await page.getByTestId('chat-thinking-toggle').click();
+      await expect(page.getByTestId('chat-model-picker-button')).toContainText('provider/model-beta (Beta) · Off');
 
       const requests = await app.evaluate(() => (
         (globalThis as typeof globalThis & { __chatModelPickerRequests?: Array<{ path: string; method: string; body: unknown }> }).__chatModelPickerRequests ?? []
@@ -301,6 +312,11 @@ test.describe('ClawX chat model picker', () => {
         path: 'gateway:sessions.patch',
         method: 'RPC',
         body: { key: 'agent:main:main', thinkingLevel: 'xhigh' },
+      });
+      expect(requests).toContainEqual({
+        path: 'gateway:sessions.patch',
+        method: 'RPC',
+        body: { key: 'agent:main:main', thinkingLevel: 'off' },
       });
       expect(requests.some((request) =>
         request.path === '/api/gateway/restart'

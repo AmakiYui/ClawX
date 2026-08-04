@@ -21,6 +21,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { Separator } from '@/components/ui/separator';
@@ -40,6 +41,7 @@ import {
   resolveProviderModelForSave,
   shouldShowProviderModelId,
   shouldInvertInDark,
+  type ProviderReasoningEffort,
 } from '@/lib/providers';
 import {
   buildProviderAccountId,
@@ -58,6 +60,92 @@ import type { OAuthCodeEvent, OAuthErrorEvent, OAuthSuccessEvent } from '@shared
 const inputClasses = 'h-[44px] rounded-xl font-mono text-meta bg-transparent border-black/10 dark:border-white/10 focus-visible:ring-2 focus-visible:ring-blue-500/50 focus-visible:border-blue-500 shadow-sm transition-all text-foreground placeholder:text-foreground/40';
 const labelClasses = 'text-sm text-foreground/80 font-bold';
 type CodePlanMode = 'apikey' | 'codeplan';
+const REASONING_EFFORTS: ProviderReasoningEffort[] = ['low', 'medium', 'high', 'xhigh'];
+
+function reasoningEffortsEqual(
+  left: ProviderReasoningEffort[] | undefined,
+  right: ProviderReasoningEffort[] | undefined,
+): boolean {
+  return REASONING_EFFORTS.every((effort) => left?.includes(effort) === right?.includes(effort));
+}
+
+function ReasoningConfigControls({
+  enabled,
+  efforts,
+  onEnabledChange,
+  onEffortsChange,
+  testIdPrefix,
+}: {
+  enabled: boolean;
+  efforts: ProviderReasoningEffort[];
+  onEnabledChange: (enabled: boolean) => void;
+  onEffortsChange: (efforts: ProviderReasoningEffort[]) => void;
+  testIdPrefix: string;
+}) {
+  const { t } = useTranslation('settings');
+  const toggleEffort = (effort: ProviderReasoningEffort) => {
+    onEffortsChange(
+      efforts.includes(effort)
+        ? efforts.filter((candidate) => candidate !== effort)
+        : REASONING_EFFORTS.filter((candidate) => candidate === effort || efforts.includes(candidate)),
+    );
+  };
+
+  return (
+    <div className="space-y-3 rounded-xl border border-black/10 p-3 dark:border-white/10">
+      <div className="flex items-center justify-between gap-4">
+        <div className="space-y-0.5">
+          <Label className="text-sm font-bold text-foreground/80">
+            {t('aiProviders.reasoning.enabled')}
+          </Label>
+          <p className="text-xs text-muted-foreground">
+            {t('aiProviders.reasoning.description')}
+          </p>
+        </div>
+        <Switch
+          data-testid={`${testIdPrefix}-reasoning-toggle`}
+          checked={enabled}
+          onCheckedChange={(checked) => {
+            onEnabledChange(checked);
+            if (!checked) onEffortsChange([]);
+          }}
+        />
+      </div>
+      {enabled && (
+        <div className="space-y-2 border-t border-black/5 pt-3 dark:border-white/5">
+          <Label className="text-meta text-muted-foreground">
+            {t('aiProviders.reasoning.levels')}
+          </Label>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {REASONING_EFFORTS.map((effort) => (
+              <label
+                key={effort}
+                className={cn(
+                  'flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-meta transition-colors',
+                  efforts.includes(effort)
+                    ? 'bg-black/5 font-medium dark:bg-white/10'
+                    : 'bg-surface-input text-muted-foreground hover:text-foreground',
+                )}
+              >
+                <input
+                  data-testid={`${testIdPrefix}-reasoning-${effort}`}
+                  type="checkbox"
+                  checked={efforts.includes(effort)}
+                  onChange={() => toggleEffort(effort)}
+                  className="rounded border-black/20 text-blue-500 focus:ring-blue-500/50 dark:border-white/20"
+                />
+                {t(`aiProviders.reasoning.options.${effort}`)}
+              </label>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {t('aiProviders.reasoning.help')}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function isZaiProviderType(type: string | undefined): boolean {
   return type === 'zai' || type === 'zai-global';
@@ -193,6 +281,8 @@ export function ProvidersSettings() {
       authMode?: ProviderAccount['authMode'];
       apiProtocol?: ProviderAccount['apiProtocol'];
       headers?: Record<string, string>;
+      reasoningEnabled?: boolean;
+      reasoningEfforts?: ProviderReasoningEffort[];
     }
   ) => {
     const vendor = vendorMap.get(type);
@@ -208,6 +298,8 @@ export function ProvidersSettings() {
         apiProtocol: options?.apiProtocol,
         headers: options?.headers,
         model: options?.model,
+        reasoningEnabled: type === 'custom' ? options?.reasoningEnabled === true : undefined,
+        reasoningEfforts: type === 'custom' ? (options?.reasoningEfforts ?? []) : undefined,
         enabled: true,
         isDefault: false,
         createdAt: new Date().toISOString(),
@@ -292,6 +384,8 @@ export function ProvidersSettings() {
                   if (payload.updates.apiProtocol !== undefined) updates.apiProtocol = payload.updates.apiProtocol;
                   if (payload.updates.headers !== undefined) updates.headers = payload.updates.headers;
                   if (payload.updates.model !== undefined) updates.model = payload.updates.model;
+                  if (payload.updates.reasoningEnabled !== undefined) updates.reasoningEnabled = payload.updates.reasoningEnabled;
+                  if (payload.updates.reasoningEfforts !== undefined) updates.reasoningEfforts = payload.updates.reasoningEfforts;
                   if (payload.updates.fallbackModels !== undefined) updates.fallbackModels = payload.updates.fallbackModels;
                   if (payload.updates.fallbackProviderIds !== undefined) {
                     updates.fallbackAccountIds = payload.updates.fallbackProviderIds;
@@ -364,6 +458,10 @@ function ProviderCard({
   const [apiProtocol, setApiProtocol] = useState<ProviderAccount['apiProtocol']>(account.apiProtocol || 'openai-completions');
   const [userAgent, setUserAgent] = useState(getUserAgentHeader(account.headers));
   const [modelId, setModelId] = useState(account.model || '');
+  const [reasoningEnabled, setReasoningEnabled] = useState(account.reasoningEnabled === true);
+  const [reasoningEfforts, setReasoningEfforts] = useState<ProviderReasoningEffort[]>(
+    account.reasoningEfforts ?? [],
+  );
   const [fallbackModelsText, setFallbackModelsText] = useState(
     normalizeFallbackModels(account.fallbackModels).join('\n')
   );
@@ -400,6 +498,8 @@ function ProviderCard({
       setApiProtocol(account.apiProtocol || 'openai-completions');
       setUserAgent(getUserAgentHeader(account.headers));
       setModelId(account.model || '');
+      setReasoningEnabled(account.reasoningEnabled === true);
+      setReasoningEfforts(account.reasoningEfforts ?? []);
       setFallbackModelsText(normalizeFallbackModels(account.fallbackModels).join('\n'));
       setFallbackProviderIds(normalizeFallbackProviderIds(account.fallbackAccountIds));
       setValidationError(null);
@@ -412,7 +512,7 @@ function ProviderCard({
         ) ? 'codeplan' : 'apikey'
       );
     }
-  }, [isEditing, account.baseUrl, account.headers, account.fallbackModels, account.fallbackAccountIds, account.model, account.apiProtocol, account.vendorId, typeInfo?.codePlanPresetBaseUrl, typeInfo?.codePlanPresetModelId]);
+  }, [isEditing, account.baseUrl, account.headers, account.fallbackModels, account.fallbackAccountIds, account.model, account.reasoningEnabled, account.reasoningEfforts, account.apiProtocol, account.vendorId, typeInfo?.codePlanPresetBaseUrl, typeInfo?.codePlanPresetModelId]);
 
   const fallbackOptions = allProviders.filter((candidate) => candidate.account.id !== account.id);
 
@@ -428,6 +528,11 @@ function ProviderCard({
     setSaving(true);
     setValidationError(null);
     try {
+      if (account.vendorId === 'custom' && reasoningEnabled && reasoningEfforts.length === 0) {
+        setValidationError(t('aiProviders.reasoning.levelRequired'));
+        setSaving(false);
+        return;
+      }
       const payload: { newApiKey?: string; updates?: Partial<ProviderConfig> } = {};
       const normalizedFallbackModels = normalizeFallbackModels(fallbackModelsText.split('\n'));
       const normalizedNewKey = normalizeProviderApiKeyInput(newKey);
@@ -460,6 +565,15 @@ function ProviderCard({
         const nextUserAgent = userAgent.trim();
         if (nextUserAgent !== existingUserAgent) {
           updates.headers = mergeHeadersWithUserAgent(account.headers, nextUserAgent);
+        }
+        if (account.vendorId === 'custom' && reasoningEnabled !== (account.reasoningEnabled === true)) {
+          updates.reasoningEnabled = reasoningEnabled;
+        }
+        if (
+          account.vendorId === 'custom'
+          && !reasoningEffortsEqual(reasoningEfforts, account.reasoningEfforts)
+        ) {
+          updates.reasoningEfforts = reasoningEfforts;
         }
         if (!fallbackModelsEqual(normalizedFallbackModels, account.fallbackModels)) {
           updates.fallbackModels = normalizedFallbackModels;
@@ -708,32 +822,41 @@ function ProviderCard({
                 </div>
               )}
               {account.vendorId === 'custom' && (
-                <div className="space-y-1.5 pt-2">
-                  <Label className={currentLabelClasses}>{t('aiProviders.dialog.protocol', 'Protocol')}</Label>
-                  <div className="flex gap-2 text-meta">
-                    <button
-                      type="button"
-                      onClick={() => setApiProtocol('openai-completions')}
-                      className={cn("flex-1 py-1.5 px-3 rounded-lg border transition-colors", apiProtocol === 'openai-completions' ? "bg-surface-modal border-black/20 dark:border-white/20 shadow-sm font-medium" : "border-transparent bg-black/5 dark:bg-white/5 text-muted-foreground hover:bg-black/10 dark:hover:bg-white/10")}
-                    >
-                      {t('aiProviders.protocols.openaiCompletions', 'OpenAI Completions')}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setApiProtocol('openai-responses')}
-                      className={cn("flex-1 py-1.5 px-3 rounded-lg border transition-colors", apiProtocol === 'openai-responses' ? "bg-surface-modal border-black/20 dark:border-white/20 shadow-sm font-medium" : "border-transparent bg-black/5 dark:bg-white/5 text-muted-foreground hover:bg-black/10 dark:hover:bg-white/10")}
-                    >
-                      {t('aiProviders.protocols.openaiResponses', 'OpenAI Responses')}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setApiProtocol('anthropic-messages')}
-                      className={cn("flex-1 py-1.5 px-3 rounded-lg border transition-colors", apiProtocol === 'anthropic-messages' ? "bg-surface-modal border-black/20 dark:border-white/20 shadow-sm font-medium" : "border-transparent bg-black/5 dark:bg-white/5 text-muted-foreground hover:bg-black/10 dark:hover:bg-white/10")}
-                    >
-                      {t('aiProviders.protocols.anthropic', 'Anthropic')}
-                    </button>
+                <>
+                  <div className="space-y-1.5 pt-2">
+                    <Label className={currentLabelClasses}>{t('aiProviders.dialog.protocol', 'Protocol')}</Label>
+                    <div className="flex gap-2 text-meta">
+                      <button
+                        type="button"
+                        onClick={() => setApiProtocol('openai-completions')}
+                        className={cn("flex-1 py-1.5 px-3 rounded-lg border transition-colors", apiProtocol === 'openai-completions' ? "bg-surface-modal border-black/20 dark:border-white/20 shadow-sm font-medium" : "border-transparent bg-black/5 dark:bg-white/5 text-muted-foreground hover:bg-black/10 dark:hover:bg-white/10")}
+                      >
+                        {t('aiProviders.protocols.openaiCompletions', 'OpenAI Completions')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setApiProtocol('openai-responses')}
+                        className={cn("flex-1 py-1.5 px-3 rounded-lg border transition-colors", apiProtocol === 'openai-responses' ? "bg-surface-modal border-black/20 dark:border-white/20 shadow-sm font-medium" : "border-transparent bg-black/5 dark:bg-white/5 text-muted-foreground hover:bg-black/10 dark:hover:bg-white/10")}
+                      >
+                        {t('aiProviders.protocols.openaiResponses', 'OpenAI Responses')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setApiProtocol('anthropic-messages')}
+                        className={cn("flex-1 py-1.5 px-3 rounded-lg border transition-colors", apiProtocol === 'anthropic-messages' ? "bg-surface-modal border-black/20 dark:border-white/20 shadow-sm font-medium" : "border-transparent bg-black/5 dark:bg-white/5 text-muted-foreground hover:bg-black/10 dark:hover:bg-white/10")}
+                      >
+                        {t('aiProviders.protocols.anthropic', 'Anthropic')}
+                      </button>
+                    </div>
                   </div>
-                </div>
+                  <ReasoningConfigControls
+                    enabled={reasoningEnabled}
+                    efforts={reasoningEfforts}
+                    onEnabledChange={setReasoningEnabled}
+                    onEffortsChange={setReasoningEfforts}
+                    testIdPrefix={`provider-edit-${account.id}`}
+                  />
+                </>
               )}
               {showUserAgentField && (
                 <div className="space-y-1.5 pt-2">
@@ -868,6 +991,8 @@ function ProviderCard({
                       !newKey.trim()
                       && (baseUrl.trim() || undefined) === (account.baseUrl || undefined)
                       && userAgent.trim() === getUserAgentHeader(account.headers).trim()
+                      && reasoningEnabled === (account.reasoningEnabled === true)
+                      && reasoningEffortsEqual(reasoningEfforts, account.reasoningEfforts)
                       && fallbackModelsEqual(normalizeFallbackModels(fallbackModelsText.split('\n')), account.fallbackModels)
                       && fallbackProviderIdsEqual(fallbackProviderIds, account.fallbackAccountIds)
                     )
@@ -929,6 +1054,8 @@ interface AddProviderDialogProps {
       authMode?: ProviderAccount['authMode'];
       apiProtocol?: ProviderAccount['apiProtocol'];
       headers?: Record<string, string>;
+      reasoningEnabled?: boolean;
+      reasoningEfforts?: ProviderReasoningEffort[];
     }
   ) => Promise<void>;
   onValidateKey: (
@@ -955,6 +1082,8 @@ function AddProviderDialog({
   const [baseUrl, setBaseUrl] = useState('');
   const [modelId, setModelId] = useState('');
   const [apiProtocol, setApiProtocol] = useState<ProviderAccount['apiProtocol']>('openai-completions');
+  const [reasoningEnabled, setReasoningEnabled] = useState(false);
+  const [reasoningEfforts, setReasoningEfforts] = useState<ProviderReasoningEffort[]>([]);
   const [showAdvancedConfig, setShowAdvancedConfig] = useState(false);
   const [userAgent, setUserAgent] = useState('');
   const [codePlanMode, setCodePlanMode] = useState<CodePlanMode>('apikey');
@@ -991,6 +1120,8 @@ function AddProviderDialog({
       setBaseUrl('');
       setModelId('');
       setApiProtocol('openai-completions');
+      setReasoningEnabled(false);
+      setReasoningEfforts([]);
       setShowAdvancedConfig(false);
       setUserAgent('');
       setCodePlanMode('apikey');
@@ -1259,6 +1390,11 @@ function AddProviderDialog({
         setSaving(false);
         return;
       }
+      if (selectedType === 'custom' && reasoningEnabled && reasoningEfforts.length === 0) {
+        setValidationError(t('aiProviders.reasoning.levelRequired'));
+        setSaving(false);
+        return;
+      }
 
       await onAdd(
         selectedType,
@@ -1269,6 +1405,8 @@ function AddProviderDialog({
           apiProtocol: (selectedType === 'custom' || selectedType === 'ollama') ? apiProtocol : undefined,
           headers: userAgent.trim() ? { 'User-Agent': userAgent.trim() } : undefined,
           model: resolveProviderModelForSave(typeInfo, modelId, devModeUnlocked),
+          reasoningEnabled: selectedType === 'custom' ? reasoningEnabled : undefined,
+          reasoningEfforts: selectedType === 'custom' ? reasoningEfforts : undefined,
           authMode: useOAuthFlow ? (preferredOAuthMode || 'oauth_device') : selectedType === 'ollama'
             ? 'local'
             : (isOAuth && supportsApiKey && authMode === 'apikey')
@@ -1553,32 +1691,41 @@ function AddProviderDialog({
                   </div>
                 )}
                 {selectedType === 'custom' && (
-                <div className="space-y-2.5">
-                  <Label className={labelClasses}>{t('aiProviders.dialog.protocol', 'Protocol')}</Label>
-                  <div className="flex gap-2 text-meta">
-                    <button
-                      type="button"
+                  <>
+                    <div className="space-y-2.5">
+                      <Label className={labelClasses}>{t('aiProviders.dialog.protocol', 'Protocol')}</Label>
+                      <div className="flex gap-2 text-meta">
+                        <button
+                          type="button"
                         onClick={() => setApiProtocol('openai-completions')}
                         className={cn("flex-1 py-1.5 px-3 rounded-lg border transition-colors", apiProtocol === 'openai-completions' ? "bg-surface-modal border-black/20 dark:border-white/20 shadow-sm font-medium" : "border-transparent bg-black/5 dark:bg-white/5 text-muted-foreground hover:bg-black/10 dark:hover:bg-white/10")}
-                    >
-                      {t('aiProviders.protocols.openaiCompletions', 'OpenAI Completions')}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setApiProtocol('openai-responses')}
-                      className={cn("flex-1 py-1.5 px-3 rounded-lg border transition-colors", apiProtocol === 'openai-responses' ? "bg-surface-modal border-black/20 dark:border-white/20 shadow-sm font-medium" : "border-transparent bg-black/5 dark:bg-white/5 text-muted-foreground hover:bg-black/10 dark:hover:bg-white/10")}
-                    >
-                      {t('aiProviders.protocols.openaiResponses', 'OpenAI Responses')}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setApiProtocol('anthropic-messages')}
-                      className={cn("flex-1 py-1.5 px-3 rounded-lg border transition-colors", apiProtocol === 'anthropic-messages' ? "bg-surface-modal border-black/20 dark:border-white/20 shadow-sm font-medium" : "border-transparent bg-black/5 dark:bg-white/5 text-muted-foreground hover:bg-black/10 dark:hover:bg-white/10")}
-                      >
-                        {t('aiProviders.protocols.anthropic', 'Anthropic')}
-                      </button>
+                        >
+                          {t('aiProviders.protocols.openaiCompletions', 'OpenAI Completions')}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setApiProtocol('openai-responses')}
+                          className={cn("flex-1 py-1.5 px-3 rounded-lg border transition-colors", apiProtocol === 'openai-responses' ? "bg-surface-modal border-black/20 dark:border-white/20 shadow-sm font-medium" : "border-transparent bg-black/5 dark:bg-white/5 text-muted-foreground hover:bg-black/10 dark:hover:bg-white/10")}
+                        >
+                          {t('aiProviders.protocols.openaiResponses', 'OpenAI Responses')}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setApiProtocol('anthropic-messages')}
+                          className={cn("flex-1 py-1.5 px-3 rounded-lg border transition-colors", apiProtocol === 'anthropic-messages' ? "bg-surface-modal border-black/20 dark:border-white/20 shadow-sm font-medium" : "border-transparent bg-black/5 dark:bg-white/5 text-muted-foreground hover:bg-black/10 dark:hover:bg-white/10")}
+                        >
+                          {t('aiProviders.protocols.anthropic', 'Anthropic')}
+                        </button>
+                      </div>
                     </div>
-                  </div>
+                    <ReasoningConfigControls
+                      enabled={reasoningEnabled}
+                      efforts={reasoningEfforts}
+                      onEnabledChange={setReasoningEnabled}
+                      onEffortsChange={setReasoningEfforts}
+                      testIdPrefix="add-provider"
+                    />
+                  </>
                 )}
                 {showUserAgentInAddDialog && (
                   <div className="space-y-2.5">

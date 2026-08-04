@@ -108,12 +108,16 @@ function translate(key: string, vars?: Record<string, unknown>): string {
       return 'Model';
     case 'composer.reasoningEffortTitle':
       return 'Reasoning effort';
+    case 'composer.reasoningEffortDescription':
+      return 'Higher effort gives more thorough responses.';
     case 'composer.reasoningEffortDefault':
       return 'Default';
-    case 'composer.reasoningEffortInherited':
-      return `Inherited: ${String(vars?.level ?? '')}`;
     case 'composer.reasoningEffortUpdateFailed':
       return `Failed to update reasoning effort: ${String(vars?.error ?? '')}`;
+    case 'composer.thinkingToggleTitle':
+      return 'Thinking';
+    case 'composer.thinkingToggleDescription':
+      return 'Use reasoning for complex tasks';
     case 'composer.clearTarget':
       return 'Clear target agent';
     case 'composer.targetChip':
@@ -707,6 +711,7 @@ describe('ChatInput agent targeting', () => {
       thinkingDefault: 'medium',
       thinkingLevels: [
         { id: 'off', label: 'Off' },
+        { id: 'minimal', label: 'Minimal' },
         { id: 'medium', label: 'Medium' },
         { id: 'high', label: 'High' },
         { id: 'xhigh', label: 'Extra High' },
@@ -719,7 +724,13 @@ describe('ChatInput agent targeting', () => {
     expect(screen.getByTestId('chat-model-picker-button')).toHaveTextContent('gpt-a (Alpha) · Medium');
     fireEvent.click(screen.getByTestId('chat-model-picker-button'));
     expect(screen.getByText('Reasoning effort')).toBeInTheDocument();
-    expect(screen.getByTestId('chat-reasoning-effort-option-inherited')).toHaveTextContent('Inherited: Medium');
+    fireEvent.click(screen.getByTestId('chat-reasoning-effort-menu-trigger'));
+    expect(screen.getByTestId('chat-reasoning-effort-menu')).toHaveTextContent(
+      'Higher effort gives more thorough responses.',
+    );
+    expect(screen.queryByTestId('chat-reasoning-effort-option-inherited')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('chat-reasoning-effort-option-minimal')).not.toBeInTheDocument();
+    expect(screen.getByTestId('chat-reasoning-effort-option-medium')).toHaveTextContent('Medium');
     expect(screen.getByTestId('chat-reasoning-effort-option-xhigh')).toHaveTextContent('Extra High');
 
     fireEvent.click(screen.getByTestId('chat-reasoning-effort-option-high'));
@@ -727,6 +738,52 @@ describe('ChatInput agent targeting', () => {
     await waitFor(() => {
       expect(chatState.updateSessionThinkingLevel).toHaveBeenCalledWith('agent:main:main', 'high');
     });
+  });
+
+  it('does not expose reasoning controls for a non-custom model', () => {
+    configureAgentAndModelPickers();
+    const now = '2025-01-01T00:00:00.000Z';
+    agentsState.defaultModelRef = 'openai/gpt-a';
+    providersState.accounts = [
+      {
+        id: 'openai',
+        vendorId: 'openai',
+        label: 'OpenAI',
+        authMode: 'oauth_browser',
+        model: 'openai/gpt-a',
+        enabled: true,
+        isDefault: true,
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        id: 'moonshot',
+        vendorId: 'moonshot',
+        label: 'Moonshot',
+        authMode: 'oauth_device',
+        model: 'moonshot/kimi',
+        enabled: true,
+        isDefault: false,
+        createdAt: now,
+        updatedAt: now,
+      },
+    ];
+    providersState.statuses = [];
+    providersState.defaultAccountId = 'openai';
+    chatState.sessions = [{
+      key: chatState.currentSessionKey,
+      thinkingDefault: 'high',
+      thinkingLevels: [
+        { id: 'off', label: 'Off' },
+        { id: 'high', label: 'High' },
+      ],
+    }];
+
+    renderChatInput();
+
+    expect(screen.getByTestId('chat-model-picker-button')).not.toHaveTextContent('High');
+    fireEvent.click(screen.getByTestId('chat-model-picker-button'));
+    expect(screen.queryByTestId('chat-reasoning-effort-menu-trigger')).not.toBeInTheDocument();
   });
 
   it('keeps send disabled while a reasoning effort patch is in flight', () => {
@@ -746,28 +803,6 @@ describe('ChatInput agent targeting', () => {
     expect(screen.getByTestId('chat-model-picker-button')).toBeDisabled();
   });
 
-  it('clears the current-session override when inherited effort is selected', async () => {
-    configureAgentAndModelPickers();
-    chatState.sessions = [{
-      key: chatState.currentSessionKey,
-      thinkingLevel: 'high',
-      thinkingDefault: 'medium',
-      thinkingLevels: [
-        { id: 'medium', label: 'Medium' },
-        { id: 'high', label: 'High' },
-      ],
-    }];
-    chatState.updateSessionThinkingLevel.mockResolvedValue(undefined);
-
-    renderChatInput();
-    fireEvent.click(screen.getByTestId('chat-model-picker-button'));
-    fireEvent.click(screen.getByTestId('chat-reasoning-effort-option-inherited'));
-
-    await waitFor(() => {
-      expect(chatState.updateSessionThinkingLevel).toHaveBeenCalledWith('agent:main:main', null);
-    });
-  });
-
   it('reports a failed reasoning effort patch', async () => {
     configureAgentAndModelPickers();
     chatState.sessions = [{
@@ -779,12 +814,38 @@ describe('ChatInput agent targeting', () => {
 
     renderChatInput();
     fireEvent.click(screen.getByTestId('chat-model-picker-button'));
+    fireEvent.click(screen.getByTestId('chat-reasoning-effort-menu-trigger'));
     fireEvent.click(screen.getByTestId('chat-reasoning-effort-option-high'));
 
     await waitFor(() => {
       expect(toastErrorMock).toHaveBeenCalledWith(
         'Failed to update reasoning effort: Error: patch failed',
       );
+    });
+  });
+
+  it('uses the thinking toggle to turn reasoning off for the current session', async () => {
+    configureAgentAndModelPickers();
+    chatState.sessions = [{
+      key: chatState.currentSessionKey,
+      thinkingLevel: 'high',
+      thinkingDefault: 'medium',
+      thinkingLevels: [
+        { id: 'off', label: 'Off' },
+        { id: 'medium', label: 'Medium' },
+        { id: 'high', label: 'High' },
+      ],
+    }];
+    chatState.updateSessionThinkingLevel.mockResolvedValue(undefined);
+
+    renderChatInput();
+    fireEvent.click(screen.getByTestId('chat-model-picker-button'));
+    fireEvent.click(screen.getByTestId('chat-reasoning-effort-menu-trigger'));
+    expect(screen.getByTestId('chat-thinking-toggle')).toBeChecked();
+    fireEvent.click(screen.getByTestId('chat-thinking-toggle'));
+
+    await waitFor(() => {
+      expect(chatState.updateSessionThinkingLevel).toHaveBeenCalledWith('agent:main:main', 'off');
     });
   });
 

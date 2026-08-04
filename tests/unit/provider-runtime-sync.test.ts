@@ -146,6 +146,42 @@ describe('provider-runtime-sync refresh strategy', () => {
     expect(gateway.debouncedRestart).not.toHaveBeenCalled();
   });
 
+  it('passes explicit reasoning metadata only for a custom provider', async () => {
+    mocks.getProviderConfig.mockReturnValue(undefined);
+    const provider = createProvider({
+      id: 'custom-a1b2c3d4',
+      type: 'custom',
+      baseUrl: 'https://example.com/v1',
+      apiProtocol: 'openai-responses',
+      model: 'gpt-5.5',
+      reasoningEnabled: true,
+      reasoningEfforts: ['low', 'high'],
+    });
+
+    await syncSavedProviderToRuntime(provider, 'sk-test');
+
+    expect(mocks.syncProviderConfigToOpenClaw).toHaveBeenCalledWith(
+      'custom-a1b2c3d4',
+      'gpt-5.5',
+      expect.objectContaining({
+        reasoningEnabled: true,
+        reasoningEfforts: ['low', 'high'],
+      }),
+    );
+    expect(mocks.updateAgentModelProvider).toHaveBeenCalledWith(
+      'custom-a1b2c3d4',
+      expect.objectContaining({
+        models: [
+          expect.objectContaining({
+            id: 'gpt-5.5',
+            reasoning: true,
+            compat: { supportedReasoningEfforts: ['low', 'high'] },
+          }),
+        ],
+      }),
+    );
+  });
+
   it('uses debouncedRestart after deleting provider config', async () => {
     const gateway = createGateway('running');
     await syncDeletedProviderToRuntime(createProvider(), 'moonshot', gateway as GatewayManager);

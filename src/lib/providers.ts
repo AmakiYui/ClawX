@@ -36,6 +36,7 @@ export type ProviderProtocol =
   | 'bedrock-converse-stream'
   | 'ollama'
   | 'azure-openai-responses';
+export type ProviderReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
 
 export const BUILTIN_PROVIDER_TYPES = [
   'anthropic',
@@ -65,6 +66,8 @@ export interface ProviderConfig {
   apiProtocol?: ProviderProtocol;
   headers?: Record<string, string>;
   model?: string;
+  reasoningEnabled?: boolean;
+  reasoningEfforts?: ProviderReasoningEffort[];
   fallbackModels?: string[];
   fallbackProviderIds?: string[];
   enabled: boolean;
@@ -133,6 +136,8 @@ export interface ProviderAccount {
   apiProtocol?: ProviderProtocol;
   headers?: Record<string, string>;
   model?: string;
+  reasoningEnabled?: boolean;
+  reasoningEfforts?: ProviderReasoningEffort[];
   fallbackModels?: string[];
   fallbackAccountIds?: string[];
   enabled: boolean;

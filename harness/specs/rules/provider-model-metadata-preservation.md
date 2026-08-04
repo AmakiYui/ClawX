@@ -24,9 +24,9 @@ backfilled with that default. Rows that already declare either field are
 user-owned and must never be modified, and non-`custom-` provider entries are
 never backfilled.
 
-Hosted OpenAI-compatible custom rows for a recognized reasoning-effort model
-family may also receive deterministic `reasoning` and
-`compat.supportedReasoningEfforts` defaults. Inference may fill only missing
-fields: an explicit `reasoning: false` or an existing compat effort list is
-user/runtime-owned and must remain unchanged. Local and non-OpenAI-compatible
-transports must not inherit these hosted capability defaults.
+Custom-provider reasoning is explicit user-owned metadata and defaults to
+`reasoning: false`; model-name inference must not enable it or create
+`compat.supportedReasoningEfforts`. When the user enables reasoning, only the
+selected primary-model effort IDs may be written. Disabling reasoning removes
+`supportedReasoningEfforts` while preserving unrelated compat keys. Provider
+sync and backfill must preserve this explicit state.

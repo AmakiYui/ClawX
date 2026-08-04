@@ -6,6 +6,7 @@ import type {
   ProviderAccount,
   ProviderConfig,
   ProviderDefinition,
+  ProviderReasoningEffort,
   ProviderType,
 } from '../../shared/providers/types';
 import { BUILTIN_PROVIDER_TYPES } from '../../shared/providers/types';
@@ -105,6 +106,50 @@ function mergeSyncedProviderMetadata(
   return Object.keys(next).length > 0 ? next : undefined;
 }
 
+const PROVIDER_REASONING_EFFORTS = new Set<ProviderReasoningEffort>([
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+]);
+
+function readCustomProviderReasoning(
+  providerKey: string,
+  entry: Record<string, unknown>,
+  modelRef: string | undefined,
+): { reasoningEnabled: boolean; reasoningEfforts: ProviderReasoningEffort[] } {
+  const modelId = modelRef?.startsWith(`${providerKey}/`)
+    ? modelRef.slice(providerKey.length + 1)
+    : modelRef;
+  const rows = Array.isArray(entry.models) ? entry.models : [];
+  const row = rows.find((candidate) => (
+    candidate
+    && typeof candidate === 'object'
+    && !Array.isArray(candidate)
+    && (candidate as Record<string, unknown>).id === modelId
+  ));
+  if (!row || typeof row !== 'object' || Array.isArray(row)) {
+    return { reasoningEnabled: false, reasoningEfforts: [] };
+  }
+
+  const record = row as Record<string, unknown>;
+  const compat = record.compat && typeof record.compat === 'object' && !Array.isArray(record.compat)
+    ? record.compat as Record<string, unknown>
+    : undefined;
+  const reasoningEfforts = Array.isArray(compat?.supportedReasoningEfforts)
+    ? compat.supportedReasoningEfforts.filter(
+      (effort): effort is ProviderReasoningEffort => (
+        typeof effort === 'string'
+        && PROVIDER_REASONING_EFFORTS.has(effort as ProviderReasoningEffort)
+      ),
+    )
+    : [];
+  return {
+    reasoningEnabled: record.reasoning === true,
+    reasoningEfforts,
+  };
+}
+
 export class ProviderService {
   async listVendors(): Promise<ProviderDefinition[]> {
     return PROVIDER_DEFINITIONS;
@@ -199,13 +244,23 @@ export class ProviderService {
           if (syncedAccount) {
             const nextMetadata = mergeSyncedProviderMetadata(kept.metadata, syncedAccount.metadata);
             const shouldSyncSelectedModel = defaultModel?.startsWith(`${key}/`) ?? false;
-            const nextModel = shouldSyncSelectedModel ? syncedAccount.model : kept.model;
+            const nextModel = shouldSyncSelectedModel ? syncedAccount.model : (kept.model ?? syncedAccount.model);
+            const reasoning = kept.vendorId === 'custom'
+              ? readCustomProviderReasoning(key, entry, nextModel)
+              : {
+                reasoningEnabled: kept.reasoningEnabled,
+                reasoningEfforts: kept.reasoningEfforts,
+              };
             const shouldSyncModelState = kept.model !== nextModel
+              || kept.reasoningEnabled !== reasoning.reasoningEnabled
+              || JSON.stringify(kept.reasoningEfforts ?? []) !== JSON.stringify(reasoning.reasoningEfforts ?? [])
               || !providerMetadataEquals(kept.metadata, nextMetadata);
             if (shouldSyncModelState) {
               kept = {
                 ...kept,
                 model: nextModel,
+                reasoningEnabled: reasoning.reasoningEnabled,
+                reasoningEfforts: reasoning.reasoningEfforts,
                 metadata: nextMetadata,
                 updatedAt: new Date().toISOString(),
               };
@@ -314,7 +369,12 @@ export class ProviderService {
         model = defaultModel;
       } else if (definition?.defaultModelId) {
         model = definition.defaultModelId;
+      } else if (vendorId === 'custom' && customModels?.[0]) {
+        model = customModels[0];
       }
+      const reasoning = vendorId === 'custom'
+        ? readCustomProviderReasoning(key, entry, model)
+        : undefined;
 
       const account: ProviderAccount = {
         id: key,
@@ -327,6 +387,8 @@ export class ProviderService {
           ? (entry.headers as Record<string, string>)
           : undefined),
         model,
+        reasoningEnabled: reasoning?.reasoningEnabled,
+        reasoningEfforts: reasoning?.reasoningEfforts,
         metadata: customModels && customModels.length > 0
           ? { customModels }
           : undefined,

@@ -114,6 +114,8 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
         apiProtocol: config.apiProtocol,
         headers: config.headers,
         model: config.model,
+        reasoningEnabled: config.reasoningEnabled,
+        reasoningEfforts: config.reasoningEfforts,
         fallbackModels: config.fallbackModels,
         fallbackAccountIds: config.fallbackProviderIds,
         enabled: config.enabled,
@@ -156,6 +158,8 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
       if (updates.apiProtocol !== undefined) accountUpdates.apiProtocol = updates.apiProtocol;
       if (updates.headers !== undefined) accountUpdates.headers = updates.headers;
       if (updates.model !== undefined) accountUpdates.model = updates.model;
+      if (updates.reasoningEnabled !== undefined) accountUpdates.reasoningEnabled = updates.reasoningEnabled;
+      if (updates.reasoningEfforts !== undefined) accountUpdates.reasoningEfforts = updates.reasoningEfforts;
       if (updates.fallbackModels !== undefined) accountUpdates.fallbackModels = updates.fallbackModels;
       if (updates.fallbackProviderIds !== undefined) accountUpdates.fallbackAccountIds = updates.fallbackProviderIds;
       if (updates.enabled !== undefined) accountUpdates.enabled = updates.enabled;

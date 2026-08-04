@@ -1,12 +1,5 @@
 export type ModelInputModality = 'text' | 'image';
 
-export type CustomModelReasoningCapabilities = {
-  reasoning: true;
-  compat: {
-    supportedReasoningEfforts: string[];
-  };
-};
-
 type ContextWindowRule = {
   /** Human-readable family label; kept so the table reads as documentation. */
   label: string;
@@ -194,41 +187,4 @@ const VISION_MODEL_PATTERNS: RegExp[] = [
 export function inferCustomModelInputModalities(modelId: string): ModelInputModality[] {
   const supportsImageInput = VISION_MODEL_PATTERNS.some((pattern) => matchesModelId(pattern, modelId));
   return supportsImageInput ? ['text', 'image'] : ['text'];
-}
-
-const STANDARD_REASONING_EFFORTS = ['low', 'medium', 'high', 'xhigh'];
-const OPENAI_COMPATIBLE_REASONING_PROTOCOLS = new Set([
-  'openai-completions',
-  'openai-responses',
-]);
-const STANDARD_REASONING_MODEL_PATTERNS = [
-  /\bgpt-5\.[2-9]\b/,
-  /\bglm-5\.[2-9]\b/,
-];
-
-/**
- * Adds the standard effort ladder only for hosted OpenAI-compatible model
- * families whose public APIs accept reasoning_effort. Unknown and local models
- * remain runtime-owned instead of receiving an optimistic capability claim.
- */
-export function inferCustomModelReasoningCapabilities(
-  modelId: string,
-  context: ModelCapabilityContext = {},
-): CustomModelReasoningCapabilities | undefined {
-  if (isLocalProviderKey(context.providerKey)) return undefined;
-  if (
-    context.apiProtocol
-    && !OPENAI_COMPATIBLE_REASONING_PROTOCOLS.has(context.apiProtocol.trim().toLowerCase())
-  ) {
-    return undefined;
-  }
-  if (!STANDARD_REASONING_MODEL_PATTERNS.some((pattern) => matchesModelId(pattern, modelId))) {
-    return undefined;
-  }
-  return {
-    reasoning: true,
-    compat: {
-      supportedReasoningEfforts: [...STANDARD_REASONING_EFFORTS],
-    },
-  };
 }

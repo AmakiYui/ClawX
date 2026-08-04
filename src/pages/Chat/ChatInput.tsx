@@ -7,8 +7,9 @@
  * are sent with the message (no base64 over WebSocket).
  */
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { SendHorizontal, Square, X, Paperclip, FileText, Film, Music, FileArchive, File, FolderOpen, Loader2, AtSign, Search, ChevronDown, Check } from 'lucide-react';
+import { SendHorizontal, Square, X, Paperclip, FileText, Film, Music, FileArchive, File, FolderOpen, Loader2, AtSign, Search, ChevronDown, ChevronRight, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { hostApi } from '@/lib/host-api';
@@ -215,6 +216,7 @@ export function ChatInput({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [skillPickerOpen, setSkillPickerOpen] = useState(false);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [reasoningMenuOpen, setReasoningMenuOpen] = useState(false);
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
   const [skillQuery, setSkillQuery] = useState('');
   const [quickSkills, setQuickSkills] = useState<QuickAccessSkill[]>([]);
@@ -228,6 +230,7 @@ export function ChatInput({
   const pickerRef = useRef<HTMLDivElement>(null);
   const skillPickerRef = useRef<HTMLDivElement>(null);
   const modelPickerRef = useRef<HTMLDivElement>(null);
+  const lastEnabledThinkingLevelRef = useRef<string | null>(null);
   const workspaceMenuRef = useRef<HTMLDivElement>(null);
   const isComposingRef = useRef(false);
   const gatewayStatus = useGatewayStore((s) => s.status);
@@ -267,28 +270,40 @@ export function ChatInput({
     [currentAgent?.modelRef, defaultModelRef, modelOptions],
   );
   const effectiveModelRef = optimisticModelRef || configuredModelRef;
+  const currentModelOption = useMemo(
+    () => modelOptions.find((option) => option.modelRef === effectiveModelRef),
+    [effectiveModelRef, modelOptions],
+  );
+  const currentModelAccount = useMemo(
+    () => providerAccounts.find((account) => account.id === currentModelOption?.accountId),
+    [currentModelOption?.accountId, providerAccounts],
+  );
+  const canConfigureThinking = currentModelAccount?.vendorId === 'custom';
   const currentModelLabel = useMemo(() => {
-    const matchedOption = modelOptions.find((option) => option.modelRef === effectiveModelRef);
-    return matchedOption?.label || formatModelRefLabel(effectiveModelRef);
-  }, [effectiveModelRef, modelOptions]);
+    return currentModelOption?.label || formatModelRefLabel(effectiveModelRef);
+  }, [currentModelOption?.label, effectiveModelRef]);
   const currentSession = useMemo(
     () => sessions.find((session) => session.key === currentSessionKey),
     [currentSessionKey, sessions],
   );
   const thinkingOptions = useMemo(
-    () => currentSession?.thinkingLevels ?? [],
-    [currentSession?.thinkingLevels],
+    () => canConfigureThinking ? (currentSession?.thinkingLevels ?? []) : [],
+    [canConfigureThinking, currentSession?.thinkingLevels],
   );
+  const effortOptions = useMemo(
+    () => thinkingOptions.filter((option) => option.id !== 'off' && option.id !== 'minimal'),
+    [thinkingOptions],
+  );
+  const supportsThinkingToggle = thinkingOptions.some((option) => option.id === 'off');
   const effectiveThinkingLevel = currentSession?.thinkingLevel ?? currentSession?.thinkingDefault;
+  const thinkingEnabled = effectiveThinkingLevel !== 'off';
   const currentThinkingLabel = useMemo(() => {
-    if (!effectiveThinkingLevel) return '';
+    if (!canConfigureThinking || !effectiveThinkingLevel || effectiveThinkingLevel === 'off') {
+      return '';
+    }
     return thinkingOptions.find((option) => option.id === effectiveThinkingLevel)?.label
       ?? effectiveThinkingLevel;
-  }, [effectiveThinkingLevel, thinkingOptions]);
-  const inheritedThinkingLabel = currentSession?.thinkingDefault
-    ? thinkingOptions.find((option) => option.id === currentSession.thinkingDefault)?.label
-      ?? currentSession.thinkingDefault
-    : t('composer.reasoningEffortDefault');
+  }, [canConfigureThinking, effectiveThinkingLevel, thinkingOptions]);
   const currentModelControlLabel = currentThinkingLabel
     ? `${currentModelLabel} · ${currentThinkingLabel}`
     : currentModelLabel;
@@ -351,6 +366,15 @@ export function ChatInput({
   useEffect(() => {
     setOptimisticModelRef(null);
   }, [currentAgent?.modelRef, currentAgentId]);
+
+  useEffect(() => {
+    if (!modelPickerOpen) setReasoningMenuOpen(false);
+  }, [modelPickerOpen]);
+
+  useEffect(() => {
+    if (!effectiveThinkingLevel || effectiveThinkingLevel === 'off') return;
+    lastEnabledThinkingLevelRef.current = currentSession?.thinkingLevel ?? null;
+  }, [currentSession?.thinkingLevel, currentSessionKey, effectiveThinkingLevel]);
 
   useEffect(() => {
     if (workspaceSelectorDisabled) {
@@ -570,6 +594,27 @@ export function ChatInput({
     switchingThinkingLevel,
     t,
     updateSessionThinkingLevel,
+  ]);
+
+  const handleToggleThinking = useCallback((enabled: boolean) => {
+    if (!enabled) {
+      if (effectiveThinkingLevel !== 'off') {
+        lastEnabledThinkingLevelRef.current =
+          currentSession?.thinkingLevel ?? currentSession?.thinkingDefault ?? null;
+      }
+      void handleSelectThinkingLevel('off');
+      return;
+    }
+    void handleSelectThinkingLevel(
+      lastEnabledThinkingLevelRef.current
+        ?? currentSession?.thinkingDefault
+        ?? null,
+    );
+  }, [
+    currentSession?.thinkingDefault,
+    currentSession?.thinkingLevel,
+    effectiveThinkingLevel,
+    handleSelectThinkingLevel,
   ]);
 
   const handleWorkspaceButtonClick = useCallback(() => {
@@ -1206,7 +1251,7 @@ export function ChatInput({
                 </button>
                 {modelPickerOpen && (
                   <div
-                    className="absolute left-0 bottom-full z-20 mb-2 w-72 overflow-hidden rounded-2xl border border-black/10 bg-surface-modal p-1.5 shadow-xl dark:border-white/10"
+                    className="absolute left-0 bottom-full z-20 mb-2 w-72 overflow-visible rounded-2xl border border-black/10 bg-surface-modal p-1.5 shadow-xl dark:border-white/10"
                     data-testid="chat-model-picker-menu"
                   >
                     <div className="px-3 py-2 text-tiny font-medium text-muted-foreground/80">
@@ -1242,49 +1287,71 @@ export function ChatInput({
                       {thinkingOptions.length > 0 && (
                         <>
                           {modelOptions.length > 1 && <div className="mx-2 my-1.5 h-px bg-border" />}
-                          <div className="px-3 pb-1 pt-1 text-tiny font-medium text-muted-foreground/70">
-                            {t('composer.reasoningEffortTitle')}
-                          </div>
                           <button
                             type="button"
-                            onClick={() => void handleSelectThinkingLevel(null)}
+                            onClick={() => setReasoningMenuOpen((open) => !open)}
                             className={cn(
                               'flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm font-medium transition-colors',
-                              currentSession?.thinkingLevel === undefined
+                              reasoningMenuOpen
                                 ? 'bg-black/5 text-foreground dark:bg-white/10'
                                 : 'hover:bg-black/5 dark:hover:bg-white/5',
                             )}
-                            data-testid="chat-reasoning-effort-option-inherited"
+                            data-testid="chat-reasoning-effort-menu-trigger"
                           >
-                            <span className="truncate">
-                              {t('composer.reasoningEffortInherited', { level: inheritedThinkingLabel })}
+                            <span>{t('composer.reasoningEffortTitle')}</span>
+                            <span className="flex min-w-0 items-center gap-1 text-muted-foreground">
+                              <span className="truncate">{currentThinkingLabel || t('composer.reasoningEffortDefault')}</span>
+                              <ChevronRight className="h-3.5 w-3.5 shrink-0" />
                             </span>
-                            {currentSession?.thinkingLevel === undefined && (
-                              <Check className="h-3.5 w-3.5 shrink-0" />
-                            )}
                           </button>
-                          {thinkingOptions.map((option) => (
-                            <button
-                              key={option.id}
-                              type="button"
-                              onClick={() => void handleSelectThinkingLevel(option.id)}
-                              className={cn(
-                                'flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm font-medium transition-colors',
-                                currentSession?.thinkingLevel === option.id
-                                  ? 'bg-black/5 text-foreground dark:bg-white/10'
-                                  : 'hover:bg-black/5 dark:hover:bg-white/5',
-                              )}
-                              data-testid={`chat-reasoning-effort-option-${option.id}`}
-                            >
-                              <span className="truncate">{option.label}</span>
-                              {currentSession?.thinkingLevel === option.id && (
-                                <Check className="h-3.5 w-3.5 shrink-0" />
-                              )}
-                            </button>
-                          ))}
                         </>
                       )}
                     </div>
+                    {reasoningMenuOpen && (
+                      <div
+                        className="absolute bottom-0 right-full z-30 mr-2 w-72 rounded-2xl border border-black/10 bg-surface-modal p-1.5 shadow-xl dark:border-white/10"
+                        data-testid="chat-reasoning-effort-menu"
+                      >
+                        <p className="px-3 py-2 text-xs leading-5 text-muted-foreground">
+                          {t('composer.reasoningEffortDescription')}
+                        </p>
+                        {effortOptions.map((option) => (
+                          <button
+                            key={option.id}
+                            type="button"
+                            onClick={() => void handleSelectThinkingLevel(option.id)}
+                            className={cn(
+                              'flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm font-medium transition-colors',
+                              effectiveThinkingLevel === option.id
+                                ? 'bg-black/5 text-foreground dark:bg-white/10'
+                                : 'hover:bg-black/5 dark:hover:bg-white/5',
+                            )}
+                            data-testid={`chat-reasoning-effort-option-${option.id}`}
+                          >
+                            <span className="truncate">{option.label}</span>
+                            {effectiveThinkingLevel === option.id && (
+                              <Check className="h-3.5 w-3.5 shrink-0" />
+                            )}
+                          </button>
+                        ))}
+                        {supportsThinkingToggle && (
+                          <div className="mx-2 mt-1 flex items-center justify-between gap-3 border-t border-border px-1 py-2">
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium">{t('composer.thinkingToggleTitle')}</p>
+                              <p className="truncate text-xs text-muted-foreground">
+                                {t('composer.thinkingToggleDescription')}
+                              </p>
+                            </div>
+                            <Switch
+                              checked={thinkingEnabled}
+                              onCheckedChange={handleToggleThinking}
+                              disabled={switchingThinkingLevel}
+                              data-testid="chat-thinking-toggle"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

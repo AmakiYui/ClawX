@@ -94,6 +94,19 @@
       "openaiResponses": "OpenAI Responses",
       "anthropic": "Anthropic 兼容"
     },
+    "reasoning": {
+      "enabled": "启用推理",
+      "description": "自定义 Provider 默认不开启推理。",
+      "levels": "支持的推理档位",
+      "help": "请只选择该 Provider 主模型实际支持的档位。",
+      "levelRequired": "启用推理后请至少选择一个推理档位。",
+      "options": {
+        "low": "低",
+        "medium": "中",
+        "high": "高",
+        "xhigh": "超高"
+      }
+    },
     "toast": {
       "added": "提供商添加成功",
       "failedAdd": "添加提供商失败",

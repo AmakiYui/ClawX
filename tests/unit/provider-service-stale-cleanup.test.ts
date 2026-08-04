@@ -176,7 +176,12 @@ describe('ProviderService.listAccounts (openclaw.json as sole source of truth)',
           baseUrl: 'http://127.0.0.1:3100/v1',
           api: 'openai-completions',
           models: [
-            { id: 'gpt-5.4', name: 'gpt-5.4' },
+            {
+              id: 'gpt-5.4',
+              name: 'gpt-5.4',
+              reasoning: true,
+              compat: { supportedReasoningEfforts: ['low', 'high'] },
+            },
             { id: 'claude-sonnet-4', name: 'claude-sonnet-4' },
             { id: 'gpt-5.4', name: 'duplicate' },
           ],
@@ -190,10 +195,14 @@ describe('ProviderService.listAccounts (openclaw.json as sole source of truth)',
     expect(mocks.saveProviderAccount).toHaveBeenCalledWith(expect.objectContaining({
       id: 'custom-model-hub',
       model: 'custom-model-hub/gpt-5.4',
+      reasoningEnabled: true,
+      reasoningEfforts: ['low', 'high'],
       metadata: { customModels: ['gpt-5.4', 'claude-sonnet-4'] },
     }));
     expect(result[0]).toEqual(expect.objectContaining({
       id: 'custom-model-hub',
+      reasoningEnabled: true,
+      reasoningEfforts: ['low', 'high'],
       metadata: { customModels: ['gpt-5.4', 'claude-sonnet-4'] },
     }));
   });
@@ -232,7 +241,12 @@ describe('ProviderService.listAccounts (openclaw.json as sole source of truth)',
           baseUrl: 'http://127.0.0.1:3100/v1',
           api: 'openai-completions',
           models: [
-            { id: 'claude-sonnet-4', name: 'claude-sonnet-4' },
+            {
+              id: 'claude-sonnet-4',
+              name: 'claude-sonnet-4',
+              reasoning: true,
+              compat: { supportedReasoningEfforts: ['medium', 'high'] },
+            },
             { id: 'gpt-5.4', name: 'gpt-5.4' },
           ],
         },
@@ -245,11 +259,15 @@ describe('ProviderService.listAccounts (openclaw.json as sole source of truth)',
     expect(mocks.saveProviderAccount).toHaveBeenCalledWith(expect.objectContaining({
       id: 'custom-model-hub',
       model: 'custom-model-hub/claude-sonnet-4',
+      reasoningEnabled: true,
+      reasoningEfforts: ['medium', 'high'],
       metadata: { customModels: ['claude-sonnet-4', 'gpt-5.4'] },
     }));
     expect(result[0]).toEqual(expect.objectContaining({
       id: 'custom-model-hub',
       model: 'custom-model-hub/claude-sonnet-4',
+      reasoningEnabled: true,
+      reasoningEfforts: ['medium', 'high'],
       metadata: { customModels: ['claude-sonnet-4', 'gpt-5.4'] },
     }));
   });

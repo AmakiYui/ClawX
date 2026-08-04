@@ -121,13 +121,14 @@ test.describe('ClawX provider lifecycle', () => {
     await page.getByTestId('add-provider-type-openai').click();
     await expect(page.getByTestId('add-provider-auth-oauth-tab')).toBeVisible();
     await expect(page.getByTestId('add-provider-auth-apikey-tab')).toBeVisible();
+    await expect(page.getByTestId('add-provider-reasoning-toggle')).toHaveCount(0);
 
     await page.getByTestId('add-provider-auth-oauth-tab').click();
     await expect(page.getByTestId('add-provider-oauth-login-button')).toBeVisible();
     await expect(page.getByTestId('add-provider-api-key-input')).toHaveCount(0);
   });
 
-  test('trims whitespace before validating and saving a custom provider key', async ({ electronApp, page }) => {
+  test('saves explicit custom-provider reasoning levels while trimming the key', async ({ electronApp, page }) => {
     await completeSetup(page);
 
     await electronApp.evaluate(async ({ app: _app }) => {
@@ -222,9 +223,19 @@ test.describe('ClawX provider lifecycle', () => {
     await page.getByTestId('add-provider-api-key-input').fill('  sk-lm-test \n');
     await page.getByTestId('add-provider-base-url-input').fill('http://127.0.0.1:1234/v1');
     await page.getByTestId('add-provider-model-id-input').fill('local-model');
+    await expect(page.getByTestId('add-provider-reasoning-toggle')).not.toBeChecked();
+    await page.getByTestId('add-provider-reasoning-toggle').click();
+    await page.getByTestId('add-provider-reasoning-low').check();
+    await page.getByTestId('add-provider-reasoning-high').check();
     await page.getByTestId('add-provider-submit-button').click();
 
     await expect(page.getByTestId('provider-card-custom')).toContainText('LM Studio Local');
+    await page.getByTestId('provider-card-custom').hover();
+    await page.getByTestId('provider-edit-custom').click();
+    await expect(page.getByTestId('provider-edit-custom-reasoning-toggle')).toBeChecked();
+    await expect(page.getByTestId('provider-edit-custom-reasoning-low')).toBeChecked();
+    await expect(page.getByTestId('provider-edit-custom-reasoning-high')).toBeChecked();
+    await expect(page.getByTestId('provider-edit-custom-reasoning-medium')).not.toBeChecked();
   });
 
   test('edit form validates the new API key inline before saving (single button)', async ({ electronApp, page }) => {

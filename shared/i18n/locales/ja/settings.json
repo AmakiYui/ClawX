@@ -94,6 +94,19 @@
       "openaiResponses": "OpenAI Responses",
       "anthropic": "Anthropic 互換"
     },
+    "reasoning": {
+      "enabled": "推論を有効化",
+      "description": "Custom プロバイダーでは既定で無効です。",
+      "levels": "対応する推論レベル",
+      "help": "このプロバイダーのプライマリモデルが実際に対応するレベルだけを選択してください。",
+      "levelRequired": "推論を有効にする場合は、少なくとも 1 つの推論レベルを選択してください。",
+      "options": {
+        "low": "低",
+        "medium": "中",
+        "high": "高",
+        "xhigh": "最高"
+      }
+    },
     "toast": {
       "added": "プロバイダーが正常に追加されました",
       "failedAdd": "プロバイダーの追加に失敗しました",

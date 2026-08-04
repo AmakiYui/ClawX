@@ -39,11 +39,11 @@ import { getSetting, setSetting } from './store';
 import {
   assertValidApiProtocol,
   normalizeOpenClawApiProtocol,
+  type ProviderReasoningEffort,
 } from '../shared/providers/types';
 import {
   inferCustomModelContextWindow,
   inferCustomModelInputModalities,
-  inferCustomModelReasoningCapabilities,
 } from '../shared/providers/model-capabilities';
 import {
   CLAWX_OPENAI_IMAGE_DEFAULT_MODEL,
@@ -910,33 +910,8 @@ function backfillCompactionReserveTokensFloor(config: Record<string, unknown>): 
 }
 
 /**
- * Add inferred reasoning metadata without replacing user/runtime-owned fields.
- */
-function applyInferredCustomModelReasoningCapabilities(
-  row: Record<string, unknown>,
-  modelId: string,
-  context: { providerKey: string; apiProtocol?: string },
-): boolean {
-  const inferred = inferCustomModelReasoningCapabilities(modelId, context);
-  if (!inferred || (row.reasoning !== undefined && row.reasoning !== true)) return false;
-
-  let changed = false;
-  if (row.reasoning === undefined) {
-    row.reasoning = true;
-    changed = true;
-  }
-  const compat = isPlainRecord(row.compat) ? { ...row.compat } : {};
-  if (compat.supportedReasoningEfforts === undefined) {
-    compat.supportedReasoningEfforts = [...inferred.compat.supportedReasoningEfforts];
-    row.compat = compat;
-    changed = true;
-  }
-  return changed;
-}
-
-/**
  * Self-heal helper: walk `models.providers.custom-*` entries and fill inferred
- * context-window and reasoning metadata that older ClawX versions omitted.
+ * context-window metadata that older ClawX versions omitted.
  *
  * Deliberately scoped to `custom-` keys: registry providers own their
  * metadata, and small local models (ollama) must not inherit a large window.
@@ -957,9 +932,6 @@ function backfillCustomProviderModelCapabilities(config: Record<string, unknown>
       };
       if (typeof row.contextWindow !== 'number' && typeof row.contextTokens !== 'number') {
         row.contextWindow = inferCustomModelContextWindow(row.id, context);
-        backfilled.add(`${providerKey}/${row.id}`);
-      }
-      if (applyInferredCustomModelReasoningCapabilities(row, row.id, context)) {
         backfilled.add(`${providerKey}/${row.id}`);
       }
     }
@@ -1638,6 +1610,8 @@ interface RuntimeProviderConfigOverride {
   apiKeyEnv?: string;
   headers?: Record<string, string>;
   authHeader?: boolean;
+  reasoningEnabled?: boolean;
+  reasoningEfforts?: ProviderReasoningEffort[];
 }
 
 type ProviderEntryBuildOptions = {
@@ -1651,6 +1625,10 @@ type ProviderEntryBuildOptions = {
   includeRegistryModels?: boolean;
   mergeExistingModels?: boolean;
   inferRuntimeModelInputs?: boolean;
+  primaryModelReasoning?: {
+    enabled: boolean;
+    efforts: ProviderReasoningEffort[];
+  };
 };
 
 function normalizeModelRef(provider: string, modelOverride?: string): string | undefined {
@@ -1924,6 +1902,43 @@ function applyOpenClawProviderAgentRuntimePinsToConfig(config: Record<string, un
   return pinned;
 }
 
+const CUSTOM_PROVIDER_REASONING_EFFORTS = new Set<ProviderReasoningEffort>([
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+]);
+
+function applyExplicitPrimaryModelReasoning(
+  models: Array<Record<string, unknown>>,
+  primaryModelId: string | undefined,
+  capability: ProviderEntryBuildOptions['primaryModelReasoning'],
+): void {
+  if (!primaryModelId || !capability) return;
+  if (capability.enabled && capability.efforts.length === 0) {
+    throw new Error('At least one reasoning effort is required when reasoning is enabled');
+  }
+  if (capability.efforts.some((effort) => !CUSTOM_PROVIDER_REASONING_EFFORTS.has(effort))) {
+    throw new Error('Invalid custom-provider reasoning effort');
+  }
+
+  const row = models.find((model) => model.id === primaryModelId);
+  if (!row) return;
+
+  row.reasoning = capability.enabled;
+  const compat = isPlainRecord(row.compat) ? { ...row.compat } : {};
+  if (capability.enabled) {
+    compat.supportedReasoningEfforts = [...new Set(capability.efforts)];
+  } else {
+    delete compat.supportedReasoningEfforts;
+  }
+  if (Object.keys(compat).length > 0) {
+    row.compat = compat;
+  } else {
+    delete row.compat;
+  }
+}
+
 function upsertOpenClawProviderEntry(
   config: Record<string, unknown>,
   provider: string,
@@ -1942,15 +1957,6 @@ function upsertOpenClawProviderEntry(
   const existingModels = options.mergeExistingModels && Array.isArray(existingProvider.models)
     ? (existingProvider.models as Array<Record<string, unknown>>)
     : [];
-  if (options.inferRuntimeModelInputs && provider.startsWith('custom-')) {
-    for (const model of existingModels) {
-      if (typeof model.id !== 'string' || !model.id) continue;
-      applyInferredCustomModelReasoningCapabilities(model, model.id, {
-        providerKey: provider,
-        apiProtocol: options.api,
-      });
-    }
-  }
   const registryModels = options.includeRegistryModels
     ? ((getProviderConfig(provider)?.models ?? []).map((m) => ({ ...m })) as Array<Record<string, unknown>>)
     : [];
@@ -1966,14 +1972,16 @@ function upsertOpenClawProviderEntry(
           providerKey: provider,
           apiProtocol: options.api,
         }),
-        ...inferCustomModelReasoningCapabilities(id, {
-          providerKey: provider,
-          apiProtocol: options.api,
-        }),
+        ...(provider.startsWith('custom-') ? { reasoning: false } : {}),
       }
       : {}),
   }));
   let mergedModels = mergeProviderModels(registryModels, existingModels, runtimeModels);
+  applyExplicitPrimaryModelReasoning(
+    mergedModels,
+    options.modelIds?.[0],
+    options.primaryModelReasoning,
+  );
   if (options.api === 'anthropic-messages') {
     mergedModels = mergedModels.map((model) => ensureAnthropicMessagesModelEntry(model, provider, existingProvider));
   }
@@ -2145,6 +2153,12 @@ export async function syncProviderConfigToOpenClaw(
         modelIds: modelId ? [modelId] : [],
         mergeExistingModels: true,
         inferRuntimeModelInputs: true,
+        primaryModelReasoning: provider.startsWith('custom-')
+          ? {
+            enabled: override.reasoningEnabled === true,
+            efforts: override.reasoningEfforts ?? [],
+          }
+          : undefined,
       });
     }
 
@@ -2862,6 +2876,17 @@ async function updateModelsJsonProviderEntriesForAgents(
     const mergedModels = (entry.models ?? []).map((m) => {
       const prev = existingModels.find((e) => e.id === m.id);
       const base = prev ? { ...prev, id: m.id, name: m.name } : { ...m };
+      if (typeof m.reasoning === 'boolean') {
+        base.reasoning = m.reasoning;
+        const compat = isPlainRecord(base.compat) ? { ...base.compat } : {};
+        if (isPlainRecord(m.compat) && Array.isArray(m.compat.supportedReasoningEfforts)) {
+          compat.supportedReasoningEfforts = [...m.compat.supportedReasoningEfforts];
+        } else if (!m.reasoning) {
+          delete compat.supportedReasoningEfforts;
+        }
+        if (Object.keys(compat).length > 0) base.compat = compat;
+        else delete base.compat;
+      }
       // Custom-provider rows need an explicit contextWindow so the embedded
       // runner can budget compaction (see backfillCustomProviderModelCapabilities).
       if (
@@ -2870,12 +2895,6 @@ async function updateModelsJsonProviderEntriesForAgents(
         && typeof base.contextTokens !== 'number'
       ) {
         base.contextWindow = inferCustomModelContextWindow(m.id, {
-          providerKey: providerType,
-          apiProtocol: entry.api,
-        });
-      }
-      if (providerType.startsWith('custom-')) {
-        applyInferredCustomModelReasoningCapabilities(base, m.id, {
           providerKey: providerType,
           apiProtocol: entry.api,
         });
