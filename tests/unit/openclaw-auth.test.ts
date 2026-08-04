@@ -986,8 +986,79 @@ describe('syncProviderConfigToOpenClaw', () => {
       expect.objectContaining({
         id: 'gpt-5.5',
         contextWindow: 1000000,
+        reasoning: true,
+        compat: {
+          supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
+        },
       }),
     ]);
+  });
+
+  it('backfills the reasoning effort ladder on an existing GLM-5.2 custom model', async () => {
+    await writeOpenClawJson({
+      models: {
+        providers: {
+          'custom-example': {
+            baseUrl: 'https://example.com/v1',
+            api: 'openai-completions',
+            models: [
+              { id: 'glm-5.2', name: 'glm-5.2', input: ['text'], contextWindow: 1000000 },
+            ],
+          },
+        },
+      },
+    });
+
+    const { syncProviderConfigToOpenClaw } = await import('@electron/utils/openclaw-auth');
+    await syncProviderConfigToOpenClaw('custom-example', 'glm-5.2', {
+      baseUrl: 'https://example.com/v1',
+      api: 'openai-completions',
+    });
+
+    const result = await readOpenClawJson();
+    const providers = (result.models as Record<string, unknown>).providers as Record<string, unknown>;
+    const entry = providers['custom-example'] as Record<string, unknown>;
+    const models = entry.models as Array<Record<string, unknown>>;
+
+    expect(models).toEqual([
+      expect.objectContaining({
+        id: 'glm-5.2',
+        reasoning: true,
+        compat: {
+          supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
+        },
+      }),
+    ]);
+  });
+
+  it('preserves an explicit non-reasoning override on a custom model', async () => {
+    await writeOpenClawJson({
+      models: {
+        providers: {
+          'custom-example': {
+            baseUrl: 'https://example.com/v1',
+            api: 'openai-completions',
+            models: [
+              { id: 'glm-5.2', name: 'glm-5.2', reasoning: false, contextWindow: 1000000 },
+            ],
+          },
+        },
+      },
+    });
+
+    const { syncProviderConfigToOpenClaw } = await import('@electron/utils/openclaw-auth');
+    await syncProviderConfigToOpenClaw('custom-example', 'glm-5.2', {
+      baseUrl: 'https://example.com/v1',
+      api: 'openai-completions',
+    });
+
+    const result = await readOpenClawJson();
+    const providers = (result.models as Record<string, unknown>).providers as Record<string, unknown>;
+    const entry = providers['custom-example'] as Record<string, unknown>;
+    const models = entry.models as Array<Record<string, unknown>>;
+
+    expect(models[0]).toMatchObject({ id: 'glm-5.2', reasoning: false });
+    expect(models[0]).not.toHaveProperty('compat');
   });
 
   it('does not overwrite an existing contextWindow on re-sync', async () => {

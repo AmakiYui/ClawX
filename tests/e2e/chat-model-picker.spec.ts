@@ -12,6 +12,13 @@ test.describe('ClawX chat model picker', () => {
         const { ipcMain } = process.mainModule!.require('electron') as typeof import('electron');
 
         let currentModelRef = refs.alphaModelRef;
+        let currentThinkingLevel: string | null = null;
+        const thinkingLevels = [
+          { id: 'low', label: 'Low' },
+          { id: 'medium', label: 'Medium' },
+          { id: 'high', label: 'High' },
+          { id: 'xhigh', label: 'Extra High' },
+        ];
         const hostRequests: Array<{ path: string; method: string; body: unknown }> = [];
         const now = new Date().toISOString();
         let releaseProviderAccounts: (() => void) | undefined;
@@ -57,7 +64,18 @@ test.describe('ClawX chat model picker', () => {
         ipcMain.handle('gateway:rpc', async (_event: unknown, method: string, params: unknown) => {
           hostRequests.push({ path: `gateway:${method}`, method: 'RPC', body: params ?? null });
           if (method === 'sessions.list') {
-            return { success: true, result: { sessions: [{ key: 'agent:main:main', displayName: 'main' }] } };
+            return {
+              success: true,
+              result: {
+                sessions: [{
+                  key: 'agent:main:main',
+                  displayName: 'main',
+                  thinkingLevel: currentThinkingLevel,
+                  thinkingDefault: 'medium',
+                  thinkingLevels,
+                }],
+              },
+            };
           }
           if (method === 'chat.history') {
             return { success: true, result: { messages: [] } };
@@ -106,7 +124,28 @@ test.describe('ClawX chat model picker', () => {
             const params = body?.params ?? null;
             hostRequests.push({ path: `gateway:${method}`, method: 'RPC', body: params });
             if (method === 'sessions.list') {
-              return makeResponse(request.id, { success: true, result: { sessions: [{ key: 'agent:main:main', displayName: 'main' }] } });
+              return makeResponse(request.id, {
+                sessions: [{
+                  key: 'agent:main:main',
+                  displayName: 'main',
+                  thinkingLevel: currentThinkingLevel,
+                  thinkingDefault: 'medium',
+                  thinkingLevels,
+                }],
+              });
+            }
+            if (method === 'sessions.patch') {
+              const patch = params as { thinkingLevel?: string | null };
+              currentThinkingLevel = patch.thinkingLevel ?? null;
+              return makeResponse(request.id, {
+                ok: true,
+                key: 'agent:main:main',
+                entry: { thinkingLevel: currentThinkingLevel },
+                resolved: {
+                  thinkingLevel: currentThinkingLevel ?? 'medium',
+                  thinkingLevels,
+                },
+              });
             }
             if (method === 'chat.history') {
               return makeResponse(request.id, { success: true, result: { messages: [] } });
@@ -233,7 +272,7 @@ test.describe('ClawX chat model picker', () => {
         win?.webContents.send('gateway:status-changed', { state: 'running', port: 18789, pid: 12345, gatewayReady: true });
       });
 
-      await expect(page.getByTestId('chat-model-picker-button')).toContainText('model-alpha (Alpha)');
+      await expect(page.getByTestId('chat-model-picker-button')).toContainText('model-alpha (Alpha) · Medium');
       await page.getByTestId('chat-model-picker-button').click();
       await expect(page.getByTestId('chat-model-picker-menu')).toBeVisible();
       await expect(page.getByTestId('chat-model-picker-menu')).toContainText('provider/model-beta (Beta)');
@@ -245,6 +284,10 @@ test.describe('ClawX chat model picker', () => {
       await expect(page.getByTestId('chat-model-picker-menu')).not.toContainText('moonshot/kimi-k2.7 (Moonshot)');
       await page.getByTestId('chat-model-picker-menu').getByRole('button', { name: 'provider/model-beta (Beta)' }).click();
       await expect(page.getByTestId('chat-model-picker-button')).toContainText('provider/model-beta (Beta)');
+      await page.getByTestId('chat-model-picker-button').click();
+      await expect(page.getByTestId('chat-model-picker-menu')).toContainText('Extra High');
+      await page.getByTestId('chat-reasoning-effort-option-xhigh').click();
+      await expect(page.getByTestId('chat-model-picker-button')).toContainText('provider/model-beta (Beta) · Extra High');
 
       const requests = await app.evaluate(() => (
         (globalThis as typeof globalThis & { __chatModelPickerRequests?: Array<{ path: string; method: string; body: unknown }> }).__chatModelPickerRequests ?? []
@@ -253,6 +296,11 @@ test.describe('ClawX chat model picker', () => {
         path: '/api/agents/main/model',
         method: 'PUT',
         body: { modelRef: betaModelRef },
+      });
+      expect(requests).toContainEqual({
+        path: 'gateway:sessions.patch',
+        method: 'RPC',
+        body: { key: 'agent:main:main', thinkingLevel: 'xhigh' },
       });
       expect(requests.some((request) =>
         request.path === '/api/gateway/restart'

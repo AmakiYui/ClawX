@@ -29,6 +29,7 @@ import { fetchCronSessionHistory } from '@/lib/cron-session-history';
 import { pickStartupSessionFallback } from './chat/session-selection';
 import {
   applyGatewaySessionsChanged,
+  normalizeGatewaySessionPatch,
   normalizeGatewaySessionRow,
   type GatewaySessionsChangedPayload,
 } from './chat/session-catalog';
@@ -2872,6 +2873,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   sessionLastActivity: {},
 
   thinkingLevel: null,
+  thinkingLevelUpdatingSessionKey: null,
 
   // ── Load sessions via sessions.list ──
 
@@ -3610,6 +3612,72 @@ export const useChatStore = create<ChatState>((set, get) => ({
       ),
       sessionLabels: { ...s.sessionLabels, [key]: normalized },
     }));
+  },
+
+  updateSessionThinkingLevel: async (key: string, level: string | null) => {
+    const state = get();
+    if (state.thinkingLevelUpdatingSessionKey) {
+      throw new Error('A reasoning effort update is already in progress');
+    }
+    const previousSession = state.sessions.find((session) => session.key === key);
+
+    set((current) => ({
+      thinkingLevelUpdatingSessionKey: key,
+      sessions: current.sessions.map((session) => {
+        if (session.key !== key) return session;
+        if (level !== null) return { ...session, thinkingLevel: level };
+        const { thinkingLevel: _thinkingLevel, ...inheritedSession } = session;
+        return inheritedSession;
+      }),
+    }));
+
+    try {
+      const result = await hostApi.gateway.rpc<{
+        resolved?: {
+          thinkingLevel?: unknown;
+          thinkingLevels?: unknown;
+        };
+      }>('sessions.patch', { key, thinkingLevel: level });
+      const resolved = result?.resolved;
+      const resolvedPatch = normalizeGatewaySessionPatch({
+        key,
+        ...(Array.isArray(resolved?.thinkingLevels)
+          ? { thinkingLevels: resolved.thinkingLevels }
+          : {}),
+      });
+      const inheritedLevel = level === null && typeof resolved?.thinkingLevel === 'string'
+        ? resolved.thinkingLevel.trim()
+        : '';
+
+      set((current) => ({
+        sessions: current.sessions.map((session) => {
+          if (session.key !== key) return session;
+          const next = { ...session };
+          if (level === null) delete next.thinkingLevel;
+          else next.thinkingLevel = level;
+          if (resolvedPatch.values.thinkingLevels) {
+            next.thinkingLevels = resolvedPatch.values.thinkingLevels;
+          }
+          if (inheritedLevel) next.thinkingDefault = inheritedLevel;
+          return next;
+        }),
+      }));
+      await get().loadSessions({ force: true });
+    } catch (error) {
+      set((current) => ({
+        sessions: previousSession
+          ? current.sessions.map((session) => session.key === key ? previousSession : session)
+          : current.sessions,
+      }));
+      throw error;
+    } finally {
+      set((current) => ({
+        thinkingLevelUpdatingSessionKey:
+          current.thinkingLevelUpdatingSessionKey === key
+            ? null
+            : current.thinkingLevelUpdatingSessionKey,
+      }));
+    }
   },
 
   // ── Cleanup empty session on navigate away ──

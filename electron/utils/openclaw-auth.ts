@@ -40,7 +40,11 @@ import {
   assertValidApiProtocol,
   normalizeOpenClawApiProtocol,
 } from '../shared/providers/types';
-import { inferCustomModelContextWindow, inferCustomModelInputModalities } from '../shared/providers/model-capabilities';
+import {
+  inferCustomModelContextWindow,
+  inferCustomModelInputModalities,
+  inferCustomModelReasoningCapabilities,
+} from '../shared/providers/model-capabilities';
 import {
   CLAWX_OPENAI_IMAGE_DEFAULT_MODEL,
   CLAWX_OPENAI_IMAGE_PROVIDER_KEY,
@@ -906,35 +910,62 @@ function backfillCompactionReserveTokensFloor(config: Record<string, unknown>): 
 }
 
 /**
- * Self-heal helper: walk `models.providers.custom-*` entries and fill in an
- * inferred `contextWindow` on model rows that have neither `contextWindow`
- * nor `contextTokens`. Rows written by older ClawX versions only carried
- * `{ id, name, input }`, which disables OpenClaw's preemptive compaction and
- * context-window guard for custom providers.
+ * Add inferred reasoning metadata without replacing user/runtime-owned fields.
+ */
+function applyInferredCustomModelReasoningCapabilities(
+  row: Record<string, unknown>,
+  modelId: string,
+  context: { providerKey: string; apiProtocol?: string },
+): boolean {
+  const inferred = inferCustomModelReasoningCapabilities(modelId, context);
+  if (!inferred || (row.reasoning !== undefined && row.reasoning !== true)) return false;
+
+  let changed = false;
+  if (row.reasoning === undefined) {
+    row.reasoning = true;
+    changed = true;
+  }
+  const compat = isPlainRecord(row.compat) ? { ...row.compat } : {};
+  if (compat.supportedReasoningEfforts === undefined) {
+    compat.supportedReasoningEfforts = [...inferred.compat.supportedReasoningEfforts];
+    row.compat = compat;
+    changed = true;
+  }
+  return changed;
+}
+
+/**
+ * Self-heal helper: walk `models.providers.custom-*` entries and fill inferred
+ * context-window and reasoning metadata that older ClawX versions omitted.
  *
  * Deliberately scoped to `custom-` keys: registry providers own their
  * metadata, and small local models (ollama) must not inherit a large window.
  */
-function backfillCustomProviderModelContextWindows(config: Record<string, unknown>): string[] {
+function backfillCustomProviderModelCapabilities(config: Record<string, unknown>): string[] {
   const models = (config.models || {}) as Record<string, unknown>;
   const providers = (models.providers || {}) as Record<string, unknown>;
-  const backfilled: string[] = [];
+  const backfilled = new Set<string>();
 
   for (const [providerKey, entry] of Object.entries(providers)) {
     if (!providerKey.startsWith('custom-') || !isPlainRecord(entry)) continue;
     const rows = Array.isArray(entry.models) ? entry.models : [];
     for (const row of rows) {
       if (!isPlainRecord(row) || typeof row.id !== 'string' || !row.id) continue;
-      if (typeof row.contextWindow === 'number' || typeof row.contextTokens === 'number') continue;
-      row.contextWindow = inferCustomModelContextWindow(row.id, {
+      const context = {
         providerKey,
         apiProtocol: typeof entry.api === 'string' ? entry.api : undefined,
-      });
-      backfilled.push(`${providerKey}/${row.id}`);
+      };
+      if (typeof row.contextWindow !== 'number' && typeof row.contextTokens !== 'number') {
+        row.contextWindow = inferCustomModelContextWindow(row.id, context);
+        backfilled.add(`${providerKey}/${row.id}`);
+      }
+      if (applyInferredCustomModelReasoningCapabilities(row, row.id, context)) {
+        backfilled.add(`${providerKey}/${row.id}`);
+      }
     }
   }
 
-  return backfilled;
+  return [...backfilled];
 }
 
 async function writeOpenClawJson(config: Record<string, unknown>): Promise<void> {
@@ -1911,6 +1942,15 @@ function upsertOpenClawProviderEntry(
   const existingModels = options.mergeExistingModels && Array.isArray(existingProvider.models)
     ? (existingProvider.models as Array<Record<string, unknown>>)
     : [];
+  if (options.inferRuntimeModelInputs && provider.startsWith('custom-')) {
+    for (const model of existingModels) {
+      if (typeof model.id !== 'string' || !model.id) continue;
+      applyInferredCustomModelReasoningCapabilities(model, model.id, {
+        providerKey: provider,
+        apiProtocol: options.api,
+      });
+    }
+  }
   const registryModels = options.includeRegistryModels
     ? ((getProviderConfig(provider)?.models ?? []).map((m) => ({ ...m })) as Array<Record<string, unknown>>)
     : [];
@@ -1923,6 +1963,10 @@ function upsertOpenClawProviderEntry(
         // Without an explicit contextWindow OpenClaw cannot budget compaction
         // for custom providers and long sessions die with context overflow.
         contextWindow: inferCustomModelContextWindow(id, {
+          providerKey: provider,
+          apiProtocol: options.api,
+        }),
+        ...inferCustomModelReasoningCapabilities(id, {
           providerKey: provider,
           apiProtocol: options.api,
         }),
@@ -2750,11 +2794,11 @@ export async function batchSyncConfigFields(token: string): Promise<void> {
       );
     }
 
-    // ── Custom provider contextWindow backfill ──
-    const backfilledContextWindows = backfillCustomProviderModelContextWindows(config);
-    if (backfilledContextWindows.length > 0) {
+    // ── Custom provider model-capability backfill ──
+    const backfilledModelCapabilities = backfillCustomProviderModelCapabilities(config);
+    if (backfilledModelCapabilities.length > 0) {
       modified = true;
-      console.log(`[batch-sync] Backfilled contextWindow for custom provider models: ${backfilledContextWindows.join(', ')}`);
+      console.log(`[batch-sync] Backfilled custom provider model capabilities: ${backfilledModelCapabilities.join(', ')}`);
     }
 
     if (modified) {
@@ -2819,13 +2863,19 @@ async function updateModelsJsonProviderEntriesForAgents(
       const prev = existingModels.find((e) => e.id === m.id);
       const base = prev ? { ...prev, id: m.id, name: m.name } : { ...m };
       // Custom-provider rows need an explicit contextWindow so the embedded
-      // runner can budget compaction (see backfillCustomProviderModelContextWindows).
+      // runner can budget compaction (see backfillCustomProviderModelCapabilities).
       if (
         providerType.startsWith('custom-')
         && typeof base.contextWindow !== 'number'
         && typeof base.contextTokens !== 'number'
       ) {
         base.contextWindow = inferCustomModelContextWindow(m.id, {
+          providerKey: providerType,
+          apiProtocol: entry.api,
+        });
+      }
+      if (providerType.startsWith('custom-')) {
+        applyInferredCustomModelReasoningCapabilities(base, m.id, {
           providerKey: providerType,
           apiProtocol: entry.api,
         });

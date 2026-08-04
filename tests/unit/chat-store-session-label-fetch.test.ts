@@ -42,6 +42,9 @@ vi.mock('@/stores/agents', () => ({
 vi.mock('@/lib/host-api', () => ({
   hostApiFetch: (...args: unknown[]) => hostApiFetchMock(...args),
   hostApi: {
+    gateway: {
+      rpc: (...args: unknown[]) => gatewayRpcMock(...args),
+    },
     media: {
       thumbnails: vi.fn(async () => ({})),
     },
@@ -108,6 +111,88 @@ describe('chat store session label summary hydration', () => {
     expect(useChatStore.getState().sessionLabels[sessionKey]).toBe(
       'Investigate the sidebar title race',
     );
+  });
+
+  it('persists and refreshes a current-session thinking override through the Gateway', async () => {
+    const sessionKey = 'agent:main:thinking';
+    gatewayRpcMock.mockImplementation(async (method: string, params?: Record<string, unknown>) => {
+      if (method === 'sessions.patch') {
+        expect(params).toEqual({ key: sessionKey, thinkingLevel: 'high' });
+        return {
+          ok: true,
+          key: sessionKey,
+          entry: { thinkingLevel: 'high' },
+          resolved: {
+            thinkingLevel: 'high',
+            thinkingLevels: [
+              { id: 'medium', label: 'Medium' },
+              { id: 'high', label: 'High' },
+            ],
+          },
+        };
+      }
+      if (method === 'sessions.list') {
+        return {
+          sessions: [{
+            key: sessionKey,
+            thinkingLevel: 'high',
+            thinkingDefault: 'medium',
+            thinkingLevels: [
+              { id: 'medium', label: 'Medium' },
+              { id: 'high', label: 'High' },
+            ],
+          }],
+        };
+      }
+      return {};
+    });
+    const { useChatStore } = await import('@/stores/chat');
+    useChatStore.setState({
+      currentSessionKey: sessionKey,
+      sessions: [{
+        key: sessionKey,
+        thinkingDefault: 'medium',
+        thinkingLevels: [{ id: 'medium', label: 'Medium' }],
+      }],
+      thinkingLevelUpdatingSessionKey: null,
+    });
+
+    await useChatStore.getState().updateSessionThinkingLevel(sessionKey, 'high');
+
+    expect(useChatStore.getState().thinkingLevelUpdatingSessionKey).toBeNull();
+    expect(useChatStore.getState().sessions).toContainEqual(expect.objectContaining({
+      key: sessionKey,
+      thinkingLevel: 'high',
+      thinkingDefault: 'medium',
+      thinkingLevels: [
+        { id: 'medium', label: 'Medium' },
+        { id: 'high', label: 'High' },
+      ],
+    }));
+  });
+
+  it('rolls back the session row when a thinking override patch fails', async () => {
+    const sessionKey = 'agent:main:thinking-failure';
+    gatewayRpcMock.mockRejectedValue(new Error('patch rejected'));
+    const { useChatStore } = await import('@/stores/chat');
+    const previous = {
+      key: sessionKey,
+      thinkingLevel: 'medium',
+      thinkingDefault: 'low',
+      thinkingLevels: [{ id: 'medium', label: 'Medium' }],
+    };
+    useChatStore.setState({
+      currentSessionKey: sessionKey,
+      sessions: [previous],
+      thinkingLevelUpdatingSessionKey: null,
+    });
+
+    await expect(
+      useChatStore.getState().updateSessionThinkingLevel(sessionKey, 'high'),
+    ).rejects.toThrow('patch rejected');
+
+    expect(useChatStore.getState().thinkingLevelUpdatingSessionKey).toBeNull();
+    expect(useChatStore.getState().sessions).toEqual([previous]);
   });
 
   it('only includes persisted main sessions missing workspacePath when workspace hydration is requested', async () => {

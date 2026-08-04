@@ -83,6 +83,11 @@ export interface ContentBlock {
   content?: unknown;
 }
 
+export interface ThinkingLevelOption {
+  id: string;
+  label: string;
+}
+
 /** Session from sessions.list */
 export interface ChatSession {
   key: string;
@@ -92,7 +97,12 @@ export interface ChatSession {
   displayName?: string;
   derivedTitle?: string;
   lastMessagePreview?: string;
+  /** Explicit session override. Undefined means inherit the Gateway-resolved default. */
   thinkingLevel?: string;
+  /** Model/runtime-specific options advertised by the Gateway. */
+  thinkingLevels?: ThinkingLevelOption[];
+  /** Effective inherited value when no explicit session override is present. */
+  thinkingDefault?: string;
   model?: string;
   updatedAt?: number;
   status?: string;
@@ -182,6 +192,7 @@ export interface ChatState {
 
   // Thinking
   thinkingLevel: string | null;
+  thinkingLevelUpdatingSessionKey: string | null;
 
   // Actions
   loadSessions: (options?: LoadSessionsOptions) => Promise<void>;
@@ -193,6 +204,7 @@ export interface ChatState {
   deleteSession: (key: string) => Promise<void>;
   deleteSessions: (keys: string[]) => Promise<DeleteSessionsResult>;
   renameSession: (key: string, label: string) => Promise<void>;
+  updateSessionThinkingLevel: (key: string, level: string | null) => Promise<void>;
   cleanupEmptySession: () => void;
   loadHistory: (quiet?: boolean) => Promise<void>;
   loadMoreHistory: () => Promise<void>;

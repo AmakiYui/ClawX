@@ -24,6 +24,7 @@ export const initialChatState: Pick<
   | 'sessionLabels'
   | 'sessionLastActivity'
   | 'thinkingLevel'
+  | 'thinkingLevelUpdatingSessionKey'
 > = {
   messages: [],
   loading: false,
@@ -47,6 +48,7 @@ export const initialChatState: Pick<
   sessionLastActivity: {},
 
   thinkingLevel: null,
+  thinkingLevelUpdatingSessionKey: null,
 };
 
 export function createChatActions(
@@ -61,6 +63,7 @@ export function createChatActions(
   | 'acknowledgeAcpSessionCreated'
   | 'deleteSession'
   | 'renameSession'
+  | 'updateSessionThinkingLevel'
   | 'cleanupEmptySession'
   | 'loadHistory'
   | 'sendMessage'

@@ -13,6 +13,10 @@ const { agentsState, chatState, gatewayState, providersState, artifactPanelMocks
   },
   chatState: {
     currentAgentId: 'main',
+    currentSessionKey: 'agent:main:main',
+    sessions: [] as Array<Record<string, unknown>>,
+    thinkingLevelUpdatingSessionKey: null as string | null,
+    updateSessionThinkingLevel: vi.fn(),
   },
   gatewayState: {
     status: { state: 'running', port: 18789 },
@@ -98,6 +102,18 @@ function translate(key: string, vars?: Record<string, unknown>): string {
       return 'No matching skills found';
     case 'composer.pickAgent':
       return 'Choose agent';
+    case 'composer.modelControlTitle':
+      return 'Model and reasoning effort';
+    case 'composer.modelSectionTitle':
+      return 'Model';
+    case 'composer.reasoningEffortTitle':
+      return 'Reasoning effort';
+    case 'composer.reasoningEffortDefault':
+      return 'Default';
+    case 'composer.reasoningEffortInherited':
+      return `Inherited: ${String(vars?.level ?? '')}`;
+    case 'composer.reasoningEffortUpdateFailed':
+      return `Failed to update reasoning effort: ${String(vars?.error ?? '')}`;
     case 'composer.clearTarget':
       return 'Clear target agent';
     case 'composer.targetChip':
@@ -224,6 +240,10 @@ describe('ChatInput agent targeting', () => {
     agentsState.defaultModelRef = null;
     agentsState.updateAgentModel.mockReset();
     chatState.currentAgentId = 'main';
+    chatState.currentSessionKey = 'agent:main:main';
+    chatState.sessions = [];
+    chatState.thinkingLevelUpdatingSessionKey = null;
+    chatState.updateSessionThinkingLevel.mockReset();
     gatewayState.status = { state: 'running', port: 18789 };
     providersState.accounts = [];
     providersState.statuses = [];
@@ -678,6 +698,94 @@ describe('ChatInput agent targeting', () => {
     expect(screen.queryByTestId('chat-model-picker-menu')).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText('Search skills')).toBeInTheDocument();
     expect(await screen.findByText('No matching skills found')).toBeInTheDocument();
+  });
+
+  it('shows Gateway reasoning options in the model menu and patches the current session', async () => {
+    configureAgentAndModelPickers();
+    chatState.sessions = [{
+      key: chatState.currentSessionKey,
+      thinkingDefault: 'medium',
+      thinkingLevels: [
+        { id: 'off', label: 'Off' },
+        { id: 'medium', label: 'Medium' },
+        { id: 'high', label: 'High' },
+        { id: 'xhigh', label: 'Extra High' },
+      ],
+    }];
+    chatState.updateSessionThinkingLevel.mockResolvedValue(undefined);
+
+    renderChatInput();
+
+    expect(screen.getByTestId('chat-model-picker-button')).toHaveTextContent('gpt-a (Alpha) · Medium');
+    fireEvent.click(screen.getByTestId('chat-model-picker-button'));
+    expect(screen.getByText('Reasoning effort')).toBeInTheDocument();
+    expect(screen.getByTestId('chat-reasoning-effort-option-inherited')).toHaveTextContent('Inherited: Medium');
+    expect(screen.getByTestId('chat-reasoning-effort-option-xhigh')).toHaveTextContent('Extra High');
+
+    fireEvent.click(screen.getByTestId('chat-reasoning-effort-option-high'));
+
+    await waitFor(() => {
+      expect(chatState.updateSessionThinkingLevel).toHaveBeenCalledWith('agent:main:main', 'high');
+    });
+  });
+
+  it('keeps send disabled while a reasoning effort patch is in flight', () => {
+    configureAgentAndModelPickers();
+    chatState.sessions = [{
+      key: chatState.currentSessionKey,
+      thinkingLevel: 'high',
+      thinkingDefault: 'medium',
+      thinkingLevels: [{ id: 'high', label: 'High' }],
+    }];
+    chatState.thinkingLevelUpdatingSessionKey = chatState.currentSessionKey;
+
+    renderChatInput();
+    fireEvent.change(screen.getByTestId('chat-composer-input'), { target: { value: 'Wait for effort' } });
+
+    expect(screen.getByTestId('chat-composer-send')).toBeDisabled();
+    expect(screen.getByTestId('chat-model-picker-button')).toBeDisabled();
+  });
+
+  it('clears the current-session override when inherited effort is selected', async () => {
+    configureAgentAndModelPickers();
+    chatState.sessions = [{
+      key: chatState.currentSessionKey,
+      thinkingLevel: 'high',
+      thinkingDefault: 'medium',
+      thinkingLevels: [
+        { id: 'medium', label: 'Medium' },
+        { id: 'high', label: 'High' },
+      ],
+    }];
+    chatState.updateSessionThinkingLevel.mockResolvedValue(undefined);
+
+    renderChatInput();
+    fireEvent.click(screen.getByTestId('chat-model-picker-button'));
+    fireEvent.click(screen.getByTestId('chat-reasoning-effort-option-inherited'));
+
+    await waitFor(() => {
+      expect(chatState.updateSessionThinkingLevel).toHaveBeenCalledWith('agent:main:main', null);
+    });
+  });
+
+  it('reports a failed reasoning effort patch', async () => {
+    configureAgentAndModelPickers();
+    chatState.sessions = [{
+      key: chatState.currentSessionKey,
+      thinkingDefault: 'medium',
+      thinkingLevels: [{ id: 'high', label: 'High' }],
+    }];
+    chatState.updateSessionThinkingLevel.mockRejectedValue(new Error('patch failed'));
+
+    renderChatInput();
+    fireEvent.click(screen.getByTestId('chat-model-picker-button'));
+    fireEvent.click(screen.getByTestId('chat-reasoning-effort-option-high'));
+
+    await waitFor(() => {
+      expect(toastErrorMock).toHaveBeenCalledWith(
+        'Failed to update reasoning effort: Error: patch failed',
+      );
+    });
   });
 
   it('closes the focused skill picker search with Escape', async () => {

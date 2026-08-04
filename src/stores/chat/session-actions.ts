@@ -5,6 +5,7 @@ import {
   shouldIncludeSessionInSidebarList,
 } from './session-key-utils';
 import { pickStartupSessionFallback } from './session-selection';
+import { normalizeGatewaySessionPatch, normalizeGatewaySessionRow } from './session-catalog';
 import { clearPendingOptimisticUserMessages, getCanonicalPrefixFromSessions, getMessageText, toMs } from './helpers';
 import { DEFAULT_CANONICAL_PREFIX, DEFAULT_SESSION_KEY, type ChatSession, type RawMessage } from './types';
 import type { ChatGet, ChatSet, SessionHistoryActions } from './store-api';
@@ -56,23 +57,6 @@ function applySessionBackendLabels(set: ChatSet, sessions: ChatSession[]): void 
   }));
 }
 
-function parseSessionUpdatedAtMs(value: unknown): number | undefined {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return toMs(value);
-  }
-  if (typeof value === 'string' && value.trim()) {
-    const parsed = Date.parse(value);
-    if (Number.isFinite(parsed)) {
-      return parsed;
-    }
-  }
-  return undefined;
-}
-
-function parseSessionStatus(value: unknown): string | undefined {
-  return typeof value === 'string' && value.trim() ? value.trim().toLowerCase() : undefined;
-}
-
 function sessionIndicatesIdle(session: ChatSession | undefined): boolean {
   if (!session) return false;
   if (session.hasActiveRun === false) return true;
@@ -118,7 +102,7 @@ function reconcileCurrentSessionIdleFromBackend(set: ChatSet, get: ChatGet, sess
 export function createSessionActions(
   set: ChatSet,
   get: ChatGet,
-): Pick<SessionHistoryActions, 'loadSessions' | 'switchSession' | 'selectAcpSession' | 'newSession' | 'acknowledgeAcpSessionCreated' | 'deleteSession' | 'renameSession' | 'cleanupEmptySession'> {
+): Pick<SessionHistoryActions, 'loadSessions' | 'switchSession' | 'selectAcpSession' | 'newSession' | 'acknowledgeAcpSessionCreated' | 'deleteSession' | 'renameSession' | 'updateSessionThinkingLevel' | 'cleanupEmptySession'> {
   return {
     loadSessions: async () => {
       try {
@@ -132,19 +116,9 @@ export function createSessionActions(
 
         if (data) {
           const rawSessions = Array.isArray(data.sessions) ? data.sessions : [];
-          const normalizedSessions: ChatSession[] = rawSessions.map((s: Record<string, unknown>) => ({
-            key: String(s.key || ''),
-            label: s.label ? String(s.label) : undefined,
-            displayName: s.displayName ? String(s.displayName) : undefined,
-            derivedTitle: s.derivedTitle ? String(s.derivedTitle) : undefined,
-            lastMessagePreview: s.lastMessagePreview ? String(s.lastMessagePreview) : undefined,
-            thinkingLevel: s.thinkingLevel ? String(s.thinkingLevel) : undefined,
-            model: s.model ? String(s.model) : undefined,
-            updatedAt: parseSessionUpdatedAtMs(s.updatedAt),
-            status: parseSessionStatus(s.status),
-            hasActiveRun: typeof s.hasActiveRun === 'boolean' ? s.hasActiveRun : undefined,
-            channel: s.lastChannel ? String(s.lastChannel) : undefined,
-          }));
+          const normalizedSessions: ChatSession[] = rawSessions.map(
+            (session: Record<string, unknown>) => normalizeGatewaySessionRow(session),
+          );
           const sessions = normalizedSessions.filter((s: ChatSession) => shouldIncludeSessionInSidebarList(s));
 
           const canonicalBySuffix = new Map<string, string>();
@@ -551,6 +525,72 @@ export function createSessionActions(
         ),
         sessionLabels: { ...s.sessionLabels, [key]: normalized },
       }));
+    },
+
+    updateSessionThinkingLevel: async (key: string, level: string | null) => {
+      const state = get();
+      if (state.thinkingLevelUpdatingSessionKey) {
+        throw new Error('A reasoning effort update is already in progress');
+      }
+      const previousSession = state.sessions.find((session) => session.key === key);
+
+      set((current) => ({
+        thinkingLevelUpdatingSessionKey: key,
+        sessions: current.sessions.map((session) => {
+          if (session.key !== key) return session;
+          if (level !== null) return { ...session, thinkingLevel: level };
+          const { thinkingLevel: _thinkingLevel, ...inheritedSession } = session;
+          return inheritedSession;
+        }),
+      }));
+
+      try {
+        const result = await hostApi.gateway.rpc<{
+          resolved?: {
+            thinkingLevel?: unknown;
+            thinkingLevels?: unknown;
+          };
+        }>('sessions.patch', { key, thinkingLevel: level });
+        const resolved = result?.resolved;
+        const resolvedPatch = normalizeGatewaySessionPatch({
+          key,
+          ...(Array.isArray(resolved?.thinkingLevels)
+            ? { thinkingLevels: resolved.thinkingLevels }
+            : {}),
+        });
+        const inheritedLevel = level === null && typeof resolved?.thinkingLevel === 'string'
+          ? resolved.thinkingLevel.trim()
+          : '';
+
+        set((current) => ({
+          sessions: current.sessions.map((session) => {
+            if (session.key !== key) return session;
+            const next = { ...session };
+            if (level === null) delete next.thinkingLevel;
+            else next.thinkingLevel = level;
+            if (resolvedPatch.values.thinkingLevels) {
+              next.thinkingLevels = resolvedPatch.values.thinkingLevels;
+            }
+            if (inheritedLevel) next.thinkingDefault = inheritedLevel;
+            return next;
+          }),
+        }));
+        await get().loadSessions({ force: true });
+      } catch (error) {
+        set((current) => ({
+          sessions: previousSession
+            ? current.sessions.map((session) => session.key === key ? previousSession : session)
+            : current.sessions,
+        }));
+        throw error;
+      } finally {
+        set((current) => ({
+          thinkingLevelUpdatingSessionKey:
+            current.thinkingLevelUpdatingSessionKey === key
+              ? null
+              : current.thinkingLevelUpdatingSessionKey,
+        }));
+      }
     },
 
     // ── Cleanup empty session on navigate away ──

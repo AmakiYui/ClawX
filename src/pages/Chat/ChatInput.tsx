@@ -241,6 +241,10 @@ export function ChatInput({
   const providerError = useProviderStore((s) => s.error);
   const refreshProviderSnapshot = useProviderStore((s) => s.refreshProviderSnapshot);
   const currentAgentId = useChatStore((s) => s.currentAgentId);
+  const currentSessionKey = useChatStore((s) => s.currentSessionKey);
+  const sessions = useChatStore((s) => s.sessions);
+  const thinkingLevelUpdatingSessionKey = useChatStore((s) => s.thinkingLevelUpdatingSessionKey);
+  const updateSessionThinkingLevel = useChatStore((s) => s.updateSessionThinkingLevel);
   const currentAgent = useMemo(
     () => (agents ?? []).find((agent) => agent.id === currentAgentId) ?? null,
     [agents, currentAgentId],
@@ -267,6 +271,28 @@ export function ChatInput({
     const matchedOption = modelOptions.find((option) => option.modelRef === effectiveModelRef);
     return matchedOption?.label || formatModelRefLabel(effectiveModelRef);
   }, [effectiveModelRef, modelOptions]);
+  const currentSession = useMemo(
+    () => sessions.find((session) => session.key === currentSessionKey),
+    [currentSessionKey, sessions],
+  );
+  const thinkingOptions = useMemo(
+    () => currentSession?.thinkingLevels ?? [],
+    [currentSession?.thinkingLevels],
+  );
+  const effectiveThinkingLevel = currentSession?.thinkingLevel ?? currentSession?.thinkingDefault;
+  const currentThinkingLabel = useMemo(() => {
+    if (!effectiveThinkingLevel) return '';
+    return thinkingOptions.find((option) => option.id === effectiveThinkingLevel)?.label
+      ?? effectiveThinkingLevel;
+  }, [effectiveThinkingLevel, thinkingOptions]);
+  const inheritedThinkingLabel = currentSession?.thinkingDefault
+    ? thinkingOptions.find((option) => option.id === currentSession.thinkingDefault)?.label
+      ?? currentSession.thinkingDefault
+    : t('composer.reasoningEffortDefault');
+  const currentModelControlLabel = currentThinkingLabel
+    ? `${currentModelLabel} · ${currentThinkingLabel}`
+    : currentModelLabel;
+  const switchingThinkingLevel = thinkingLevelUpdatingSessionKey === currentSessionKey;
   const mentionableAgents = useMemo(
     () => (agents ?? []).filter((agent) => agent.id !== currentAgentId),
     [agents, currentAgentId],
@@ -285,7 +311,7 @@ export function ChatInput({
     );
   }, [quickSkills, skillQuery]);
   const showAgentPicker = mentionableAgents.length > 0;
-  const showModelPicker = modelOptions.length > 1;
+  const showModelPicker = modelOptions.length > 1 || thinkingOptions.length > 0;
   const chatComposerStatusComponents = rendererExtensionRegistry.getChatComposerStatusComponents();
   const isGatewayUsable = gatewayStatus.state === 'running' && gatewayStatus.gatewayReady !== false;
   const inputDisabled = disabled;
@@ -523,6 +549,29 @@ export function ChatInput({
     }
   }, [currentAgent, defaultModelRef, effectiveModelRef, switchingModelRef, t, updateAgentModel]);
 
+  const handleSelectThinkingLevel = useCallback(async (level: string | null) => {
+    if (switchingThinkingLevel || level === (currentSession?.thinkingLevel ?? null)) {
+      setModelPickerOpen(false);
+      textareaRef.current?.focus();
+      return;
+    }
+
+    setModelPickerOpen(false);
+    try {
+      await updateSessionThinkingLevel(currentSessionKey, level);
+    } catch (error) {
+      toast.error(t('composer.reasoningEffortUpdateFailed', { error: String(error) }));
+    } finally {
+      textareaRef.current?.focus();
+    }
+  }, [
+    currentSession?.thinkingLevel,
+    currentSessionKey,
+    switchingThinkingLevel,
+    t,
+    updateSessionThinkingLevel,
+  ]);
+
   const handleWorkspaceButtonClick = useCallback(() => {
     if (workspaceSelectorDisabled) return;
     setPickerOpen(false);
@@ -688,6 +737,7 @@ export function ChatInput({
     && allReady
     && !inputDisabled
     && !sending
+    && !switchingThinkingLevel
     && !imageGenerating;
   const canStop = sending && !inputDisabled && !!onStop;
 
@@ -1136,8 +1186,8 @@ export function ChatInput({
                   type="button"
                   data-testid="chat-model-picker-button"
                   className={cn(
-                    'inline-flex h-8 max-w-[220px] items-center gap-1 rounded-lg px-1.5 text-meta font-medium text-muted-foreground transition-colors hover:bg-transparent hover:text-foreground focus-visible:outline-none focus-visible:ring-0 disabled:pointer-events-none disabled:opacity-50',
-                    (modelPickerOpen || switchingModelRef) && 'text-foreground',
+                    'inline-flex h-8 max-w-[280px] items-center gap-1 rounded-lg px-1.5 text-meta font-medium text-muted-foreground transition-colors hover:bg-transparent hover:text-foreground focus-visible:outline-none focus-visible:ring-0 disabled:pointer-events-none disabled:opacity-50',
+                    (modelPickerOpen || switchingModelRef || switchingThinkingLevel) && 'text-foreground',
                   )}
                   onClick={() => {
                     setPickerOpen(false);
@@ -1145,13 +1195,13 @@ export function ChatInput({
                     setWorkspaceMenuOpen(false);
                     setModelPickerOpen((open) => !open);
                   }}
-                  disabled={inputDisabled || sending || !currentAgent || !!switchingModelRef}
-                  title={t('composer.pickModel')}
+                  disabled={inputDisabled || sending || !currentAgent || !!switchingModelRef || switchingThinkingLevel}
+                  title={t('composer.modelControlTitle')}
                 >
-                  {switchingModelRef ? (
+                  {(switchingModelRef || switchingThinkingLevel) ? (
                     <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
                   ) : null}
-                  <span className="truncate">{currentModelLabel}</span>
+                  <span className="truncate">{currentModelControlLabel}</span>
                   <ChevronDown className={cn('h-3.5 w-3.5 shrink-0 transition-transform', modelPickerOpen && 'rotate-180')} />
                 </button>
                 {modelPickerOpen && (
@@ -1160,26 +1210,80 @@ export function ChatInput({
                     data-testid="chat-model-picker-menu"
                   >
                     <div className="px-3 py-2 text-tiny font-medium text-muted-foreground/80">
-                      {t('composer.modelPickerTitle')}
+                      {t('composer.modelControlTitle')}
                     </div>
-                    <div className="max-h-64 overflow-y-auto">
-                      {modelOptions.map((option) => (
-                        <button
-                          key={option.modelRef}
-                          type="button"
-                          onClick={() => void handleSelectModel(option.modelRef)}
-                          className={cn(
-                            'flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm font-medium transition-colors',
-                            option.modelRef === effectiveModelRef ? 'bg-primary/10 text-foreground' : 'hover:bg-black/5 dark:hover:bg-white/5'
-                          )}
-                          data-testid={`chat-model-picker-option-${option.label}`}
-                        >
-                          <span className="truncate">{option.label}</span>
-                          {option.modelRef === effectiveModelRef && (
-                            <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-                          )}
-                        </button>
-                      ))}
+                    <div className="max-h-72 overflow-y-auto">
+                      {modelOptions.length > 1 && (
+                        <>
+                          <div className="px-3 pb-1 pt-1 text-tiny font-medium text-muted-foreground/70">
+                            {t('composer.modelSectionTitle')}
+                          </div>
+                          {modelOptions.map((option) => (
+                            <button
+                              key={option.modelRef}
+                              type="button"
+                              onClick={() => void handleSelectModel(option.modelRef)}
+                              className={cn(
+                                'flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm font-medium transition-colors',
+                                option.modelRef === effectiveModelRef
+                                  ? 'bg-black/5 text-foreground dark:bg-white/10'
+                                  : 'hover:bg-black/5 dark:hover:bg-white/5',
+                              )}
+                              data-testid={`chat-model-picker-option-${option.label}`}
+                            >
+                              <span className="truncate">{option.label}</span>
+                              {option.modelRef === effectiveModelRef && (
+                                <Check className="h-3.5 w-3.5 shrink-0" />
+                              )}
+                            </button>
+                          ))}
+                        </>
+                      )}
+                      {thinkingOptions.length > 0 && (
+                        <>
+                          {modelOptions.length > 1 && <div className="mx-2 my-1.5 h-px bg-border" />}
+                          <div className="px-3 pb-1 pt-1 text-tiny font-medium text-muted-foreground/70">
+                            {t('composer.reasoningEffortTitle')}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => void handleSelectThinkingLevel(null)}
+                            className={cn(
+                              'flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm font-medium transition-colors',
+                              currentSession?.thinkingLevel === undefined
+                                ? 'bg-black/5 text-foreground dark:bg-white/10'
+                                : 'hover:bg-black/5 dark:hover:bg-white/5',
+                            )}
+                            data-testid="chat-reasoning-effort-option-inherited"
+                          >
+                            <span className="truncate">
+                              {t('composer.reasoningEffortInherited', { level: inheritedThinkingLabel })}
+                            </span>
+                            {currentSession?.thinkingLevel === undefined && (
+                              <Check className="h-3.5 w-3.5 shrink-0" />
+                            )}
+                          </button>
+                          {thinkingOptions.map((option) => (
+                            <button
+                              key={option.id}
+                              type="button"
+                              onClick={() => void handleSelectThinkingLevel(option.id)}
+                              className={cn(
+                                'flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm font-medium transition-colors',
+                                currentSession?.thinkingLevel === option.id
+                                  ? 'bg-black/5 text-foreground dark:bg-white/10'
+                                  : 'hover:bg-black/5 dark:hover:bg-white/5',
+                              )}
+                              data-testid={`chat-reasoning-effort-option-${option.id}`}
+                            >
+                              <span className="truncate">{option.label}</span>
+                              {currentSession?.thinkingLevel === option.id && (
+                                <Check className="h-3.5 w-3.5 shrink-0" />
+                              )}
+                            </button>
+                          ))}
+                        </>
+                      )}
                     </div>
                   </div>
                 )}

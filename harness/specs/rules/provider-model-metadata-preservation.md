@@ -23,3 +23,10 @@ existing rows missing both `contextWindow` and `contextTokens` may be
 backfilled with that default. Rows that already declare either field are
 user-owned and must never be modified, and non-`custom-` provider entries are
 never backfilled.
+
+Hosted OpenAI-compatible custom rows for a recognized reasoning-effort model
+family may also receive deterministic `reasoning` and
+`compat.supportedReasoningEfforts` defaults. Inference may fill only missing
+fields: an explicit `reasoning: false` or an existing compat effort list is
+user/runtime-owned and must remain unchanged. Local and non-OpenAI-compatible
+transports must not inherit these hosted capability defaults.

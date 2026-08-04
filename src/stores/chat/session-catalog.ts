@@ -20,6 +20,7 @@ const STRING_FIELDS = [
   'derivedTitle',
   'lastMessagePreview',
   'thinkingLevel',
+  'thinkingDefault',
   'model',
   'workspacePath',
 ] as const satisfies readonly SessionField[];
@@ -67,6 +68,20 @@ export function normalizeGatewaySessionPatch(raw: Record<string, unknown>): Norm
       cleared.add(field);
     } else if (typeof value === 'string' && value) {
       values[field] = value;
+    }
+  }
+
+  if (hasOwn(raw, 'thinkingLevels')) {
+    present.add('thinkingLevels');
+    if (raw.thinkingLevels === null) {
+      cleared.add('thinkingLevels');
+    } else if (Array.isArray(raw.thinkingLevels)) {
+      values.thinkingLevels = raw.thinkingLevels.flatMap((option) => {
+        if (!isRecord(option)) return [];
+        const id = typeof option.id === 'string' ? option.id.trim() : '';
+        const label = typeof option.label === 'string' ? option.label.trim() : '';
+        return id && label ? [{ id, label }] : [];
+      });
     }
   }
 
