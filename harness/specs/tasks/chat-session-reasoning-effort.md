@@ -55,7 +55,7 @@ requiredTests:
 acceptance:
   - Renderer uses the typed host-api Gateway RPC boundary and never opens its own Gateway transport.
   - thinkingLevels, thinkingDefault, and thinkingLevel remain Gateway-owned session metadata.
-  - Custom-provider reasoning levels come only from explicit user-owned OpenClaw capability metadata.
+  - Custom-provider primary models are synced with a fixed OpenClaw reasoning ladder; provider settings do not expose enable-reasoning controls.
   - Explicit off is distinct from a cleared override.
   - Failed patches restore the prior session state and leave the message available to send.
   - New labels are localized in English, Chinese, Japanese, and Russian.

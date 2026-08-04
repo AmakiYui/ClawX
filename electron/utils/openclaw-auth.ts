@@ -38,8 +38,8 @@ import { PORTS } from './config';
 import { getSetting, setSetting } from './store';
 import {
   assertValidApiProtocol,
+  CUSTOM_PROVIDER_DEFAULT_REASONING_EFFORTS,
   normalizeOpenClawApiProtocol,
-  type ProviderReasoningEffort,
 } from '../shared/providers/types';
 import {
   inferCustomModelContextWindow,
@@ -1610,8 +1610,6 @@ interface RuntimeProviderConfigOverride {
   apiKeyEnv?: string;
   headers?: Record<string, string>;
   authHeader?: boolean;
-  reasoningEnabled?: boolean;
-  reasoningEfforts?: ProviderReasoningEffort[];
 }
 
 type ProviderEntryBuildOptions = {
@@ -1625,10 +1623,6 @@ type ProviderEntryBuildOptions = {
   includeRegistryModels?: boolean;
   mergeExistingModels?: boolean;
   inferRuntimeModelInputs?: boolean;
-  primaryModelReasoning?: {
-    enabled: boolean;
-    efforts: ProviderReasoningEffort[];
-  };
 };
 
 function normalizeModelRef(provider: string, modelOverride?: string): string | undefined {
@@ -1902,41 +1896,19 @@ function applyOpenClawProviderAgentRuntimePinsToConfig(config: Record<string, un
   return pinned;
 }
 
-const CUSTOM_PROVIDER_REASONING_EFFORTS = new Set<ProviderReasoningEffort>([
-  'low',
-  'medium',
-  'high',
-  'xhigh',
-]);
-
-function applyExplicitPrimaryModelReasoning(
+function applyCustomPrimaryModelReasoning(
   models: Array<Record<string, unknown>>,
   primaryModelId: string | undefined,
-  capability: ProviderEntryBuildOptions['primaryModelReasoning'],
 ): void {
-  if (!primaryModelId || !capability) return;
-  if (capability.enabled && capability.efforts.length === 0) {
-    throw new Error('At least one reasoning effort is required when reasoning is enabled');
-  }
-  if (capability.efforts.some((effort) => !CUSTOM_PROVIDER_REASONING_EFFORTS.has(effort))) {
-    throw new Error('Invalid custom-provider reasoning effort');
-  }
+  if (!primaryModelId) return;
 
   const row = models.find((model) => model.id === primaryModelId);
   if (!row) return;
 
-  row.reasoning = capability.enabled;
+  row.reasoning = true;
   const compat = isPlainRecord(row.compat) ? { ...row.compat } : {};
-  if (capability.enabled) {
-    compat.supportedReasoningEfforts = [...new Set(capability.efforts)];
-  } else {
-    delete compat.supportedReasoningEfforts;
-  }
-  if (Object.keys(compat).length > 0) {
-    row.compat = compat;
-  } else {
-    delete row.compat;
-  }
+  compat.supportedReasoningEfforts = [...CUSTOM_PROVIDER_DEFAULT_REASONING_EFFORTS];
+  row.compat = compat;
 }
 
 function upsertOpenClawProviderEntry(
@@ -1972,16 +1944,13 @@ function upsertOpenClawProviderEntry(
           providerKey: provider,
           apiProtocol: options.api,
         }),
-        ...(provider.startsWith('custom-') ? { reasoning: false } : {}),
       }
       : {}),
   }));
   let mergedModels = mergeProviderModels(registryModels, existingModels, runtimeModels);
-  applyExplicitPrimaryModelReasoning(
-    mergedModels,
-    options.modelIds?.[0],
-    options.primaryModelReasoning,
-  );
+  if (provider.startsWith('custom-')) {
+    applyCustomPrimaryModelReasoning(mergedModels, options.modelIds?.[0]);
+  }
   if (options.api === 'anthropic-messages') {
     mergedModels = mergedModels.map((model) => ensureAnthropicMessagesModelEntry(model, provider, existingProvider));
   }
@@ -2153,12 +2122,6 @@ export async function syncProviderConfigToOpenClaw(
         modelIds: modelId ? [modelId] : [],
         mergeExistingModels: true,
         inferRuntimeModelInputs: true,
-        primaryModelReasoning: provider.startsWith('custom-')
-          ? {
-            enabled: override.reasoningEnabled === true,
-            efforts: override.reasoningEfforts ?? [],
-          }
-          : undefined,
       });
     }
 

@@ -128,7 +128,7 @@ test.describe('ClawX provider lifecycle', () => {
     await expect(page.getByTestId('add-provider-api-key-input')).toHaveCount(0);
   });
 
-  test('saves explicit custom-provider reasoning levels while trimming the key', async ({ electronApp, page }) => {
+  test('saves a custom provider while trimming the key and without reasoning settings', async ({ electronApp, page }) => {
     await completeSetup(page);
 
     await electronApp.evaluate(async ({ app: _app }) => {
@@ -223,19 +223,13 @@ test.describe('ClawX provider lifecycle', () => {
     await page.getByTestId('add-provider-api-key-input').fill('  sk-lm-test \n');
     await page.getByTestId('add-provider-base-url-input').fill('http://127.0.0.1:1234/v1');
     await page.getByTestId('add-provider-model-id-input').fill('local-model');
-    await expect(page.getByTestId('add-provider-reasoning-toggle')).not.toBeChecked();
-    await page.getByTestId('add-provider-reasoning-toggle').click();
-    await page.getByTestId('add-provider-reasoning-low').check();
-    await page.getByTestId('add-provider-reasoning-high').check();
+    await expect(page.getByTestId('add-provider-reasoning-toggle')).toHaveCount(0);
     await page.getByTestId('add-provider-submit-button').click();
 
     await expect(page.getByTestId('provider-card-custom')).toContainText('LM Studio Local');
     await page.getByTestId('provider-card-custom').hover();
     await page.getByTestId('provider-edit-custom').click();
-    await expect(page.getByTestId('provider-edit-custom-reasoning-toggle')).toBeChecked();
-    await expect(page.getByTestId('provider-edit-custom-reasoning-low')).toBeChecked();
-    await expect(page.getByTestId('provider-edit-custom-reasoning-high')).toBeChecked();
-    await expect(page.getByTestId('provider-edit-custom-reasoning-medium')).not.toBeChecked();
+    await expect(page.getByTestId('provider-edit-custom-reasoning-toggle')).toHaveCount(0);
   });
 
   test('edit form validates the new API key inline before saving (single button)', async ({ electronApp, page }) => {

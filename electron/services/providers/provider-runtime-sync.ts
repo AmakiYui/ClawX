@@ -4,6 +4,7 @@ import { getProviderSecret } from '../secrets/secret-store';
 import type { ProviderConfig } from '../../utils/secure-storage';
 import { getAllProviders, getApiKey, getDefaultProvider, getProvider } from '../../utils/secure-storage';
 import { getProviderConfig, getProviderDefaultModel } from '../../utils/provider-registry';
+import { CUSTOM_PROVIDER_DEFAULT_REASONING_EFFORTS } from '../../shared/providers/types';
 import {
   ensureAnthropicMessagesModelMaxTokens,
   ensureOpenClawProviderAgentRuntimePins,
@@ -327,26 +328,17 @@ async function syncRuntimeProviderConfig(
     api: context.api,
     apiKeyEnv: context.meta?.apiKeyEnv,
     headers: config.headers ?? context.meta?.headers,
-    ...(config.type === 'custom'
-      ? {
-        reasoningEnabled: config.reasoningEnabled === true,
-        reasoningEfforts: config.reasoningEfforts ?? [],
-      }
-      : {}),
   });
 }
 
-function customProviderModelEntry(config: ProviderConfig, modelId: string) {
-  const entry: ReturnType<typeof piAiModelsJsonModelEntry> & Record<string, unknown> = {
+function customProviderModelEntry(_config: ProviderConfig, modelId: string) {
+  return {
     ...piAiModelsJsonModelEntry(modelId),
-    reasoning: config.reasoningEnabled === true,
+    reasoning: true,
+    compat: {
+      supportedReasoningEfforts: [...CUSTOM_PROVIDER_DEFAULT_REASONING_EFFORTS],
+    },
   };
-  if (config.reasoningEnabled === true) {
-    entry.compat = {
-      supportedReasoningEfforts: [...(config.reasoningEfforts ?? [])],
-    };
-  }
-  return entry;
 }
 
 async function syncCustomProviderAgentModel(

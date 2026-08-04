@@ -94,19 +94,6 @@
       "openaiResponses": "OpenAI Responses",
       "anthropic": "Anthropic Compatible"
     },
-    "reasoning": {
-      "enabled": "Enable reasoning",
-      "description": "Disabled by default for custom providers.",
-      "levels": "Supported thinking levels",
-      "help": "Select only levels accepted by this provider for the primary model.",
-      "levelRequired": "Select at least one thinking level when reasoning is enabled.",
-      "options": {
-        "low": "Low",
-        "medium": "Medium",
-        "high": "High",
-        "xhigh": "Extra High"
-      }
-    },
     "toast": {
       "added": "Provider added successfully",
       "failedAdd": "Failed to add provider",

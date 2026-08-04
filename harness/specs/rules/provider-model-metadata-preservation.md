@@ -24,9 +24,8 @@ backfilled with that default. Rows that already declare either field are
 user-owned and must never be modified, and non-`custom-` provider entries are
 never backfilled.
 
-Custom-provider reasoning is explicit user-owned metadata and defaults to
-`reasoning: false`; model-name inference must not enable it or create
-`compat.supportedReasoningEfforts`. When the user enables reasoning, only the
-selected primary-model effort IDs may be written. Disabling reasoning removes
-`supportedReasoningEfforts` while preserving unrelated compat keys. Provider
-sync and backfill must preserve this explicit state.
+Custom-provider primary model rows receive `reasoning: true` and the fixed
+effort ladder `compat.supportedReasoningEfforts: ["low","medium","high","xhigh"]`
+so Chat can offer session thinking controls. Provider settings must not expose
+enable-reasoning controls, and model-name inference must not invent a different
+effort list. Sync must preserve unrelated compat keys while writing this ladder.

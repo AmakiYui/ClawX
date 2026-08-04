@@ -939,9 +939,12 @@ describe('syncProviderConfigToOpenClaw', () => {
         id: 'model-a',
         name: 'Model A',
         input: ['text', 'image'],
-        reasoning: false,
+        reasoning: true,
         contextWindow: 200000,
         customField: 'keep-me',
+        compat: {
+          supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
+        },
       }),
     ]);
   });
@@ -964,13 +967,35 @@ describe('syncProviderConfigToOpenClaw', () => {
       expect.objectContaining({
         id: 'private-model-x',
         input: ['text'],
-        reasoning: false,
+        reasoning: true,
+        compat: {
+          supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
+        },
       }),
     ]);
   });
 
-  it('keeps reasoning disabled by default on new custom-provider model rows', async () => {
-    await writeOpenClawJson({ models: { providers: {} } });
+  it('enables the default reasoning effort ladder on custom-provider primary models', async () => {
+    await writeOpenClawJson({
+      models: {
+        providers: {
+          'custom-example': {
+            baseUrl: 'https://example.com/v1',
+            api: 'openai-completions',
+            models: [
+              {
+                id: 'gpt-5.5',
+                name: 'gpt-5.5',
+                input: ['text'],
+                contextWindow: 1000000,
+                reasoning: false,
+                compat: { customFlag: true },
+              },
+            ],
+          },
+        },
+      },
+    });
 
     const { syncProviderConfigToOpenClaw } = await import('@electron/utils/openclaw-auth');
     await syncProviderConfigToOpenClaw('custom-example', 'gpt-5.5', {
@@ -987,112 +1012,13 @@ describe('syncProviderConfigToOpenClaw', () => {
       expect.objectContaining({
         id: 'gpt-5.5',
         contextWindow: 1000000,
-        reasoning: false,
-      }),
-    ]);
-    expect(models[0]).not.toHaveProperty('compat');
-  });
-
-  it('writes user-selected reasoning efforts on the primary custom model', async () => {
-    await writeOpenClawJson({
-      models: {
-        providers: {
-          'custom-example': {
-            baseUrl: 'https://example.com/v1',
-            api: 'openai-completions',
-            models: [
-              {
-                id: 'glm-5.2',
-                name: 'glm-5.2',
-                input: ['text'],
-                contextWindow: 1000000,
-                compat: { customFlag: true },
-              },
-            ],
-          },
-        },
-      },
-    });
-
-    const { syncProviderConfigToOpenClaw } = await import('@electron/utils/openclaw-auth');
-    await syncProviderConfigToOpenClaw('custom-example', 'glm-5.2', {
-      baseUrl: 'https://example.com/v1',
-      api: 'openai-completions',
-      reasoningEnabled: true,
-      reasoningEfforts: ['low', 'high'],
-    });
-
-    const result = await readOpenClawJson();
-    const providers = (result.models as Record<string, unknown>).providers as Record<string, unknown>;
-    const entry = providers['custom-example'] as Record<string, unknown>;
-    const models = entry.models as Array<Record<string, unknown>>;
-
-    expect(models).toEqual([
-      expect.objectContaining({
-        id: 'glm-5.2',
         reasoning: true,
         compat: {
           customFlag: true,
-          supportedReasoningEfforts: ['low', 'high'],
+          supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
         },
       }),
     ]);
-  });
-
-  it('rejects enabled reasoning without a selected effort', async () => {
-    await writeOpenClawJson({ models: { providers: {} } });
-
-    const { syncProviderConfigToOpenClaw } = await import('@electron/utils/openclaw-auth');
-    await expect(syncProviderConfigToOpenClaw('custom-example', 'glm-5.2', {
-      baseUrl: 'https://example.com/v1',
-      api: 'openai-completions',
-      reasoningEnabled: true,
-      reasoningEfforts: [],
-    })).rejects.toThrow('At least one reasoning effort is required');
-  });
-
-  it('disables reasoning and clears only its effort list', async () => {
-    await writeOpenClawJson({
-      models: {
-        providers: {
-          'custom-example': {
-            baseUrl: 'https://example.com/v1',
-            api: 'openai-completions',
-            models: [
-              {
-                id: 'glm-5.2',
-                name: 'glm-5.2',
-                reasoning: true,
-                contextWindow: 1000000,
-                compat: {
-                  customFlag: true,
-                  supportedReasoningEfforts: ['low', 'medium', 'high'],
-                },
-              },
-            ],
-          },
-        },
-      },
-    });
-
-    const { syncProviderConfigToOpenClaw } = await import('@electron/utils/openclaw-auth');
-    await syncProviderConfigToOpenClaw('custom-example', 'glm-5.2', {
-      baseUrl: 'https://example.com/v1',
-      api: 'openai-completions',
-      reasoningEnabled: false,
-      reasoningEfforts: [],
-    });
-
-    const result = await readOpenClawJson();
-    const providers = (result.models as Record<string, unknown>).providers as Record<string, unknown>;
-    const entry = providers['custom-example'] as Record<string, unknown>;
-    const models = entry.models as Array<Record<string, unknown>>;
-
-    expect(models[0]).toMatchObject({
-      id: 'glm-5.2',
-      reasoning: false,
-      compat: { customFlag: true },
-    });
   });
 
   it('does not overwrite an existing contextWindow on re-sync', async () => {

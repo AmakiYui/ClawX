@@ -146,7 +146,7 @@ describe('provider-runtime-sync refresh strategy', () => {
     expect(gateway.debouncedRestart).not.toHaveBeenCalled();
   });
 
-  it('passes explicit reasoning metadata only for a custom provider', async () => {
+  it('writes the default reasoning ladder for a custom provider primary model', async () => {
     mocks.getProviderConfig.mockReturnValue(undefined);
     const provider = createProvider({
       id: 'custom-a1b2c3d4',
@@ -154,8 +154,6 @@ describe('provider-runtime-sync refresh strategy', () => {
       baseUrl: 'https://example.com/v1',
       apiProtocol: 'openai-responses',
       model: 'gpt-5.5',
-      reasoningEnabled: true,
-      reasoningEfforts: ['low', 'high'],
     });
 
     await syncSavedProviderToRuntime(provider, 'sk-test');
@@ -164,8 +162,8 @@ describe('provider-runtime-sync refresh strategy', () => {
       'custom-a1b2c3d4',
       'gpt-5.5',
       expect.objectContaining({
-        reasoningEnabled: true,
-        reasoningEfforts: ['low', 'high'],
+        baseUrl: 'https://example.com/v1',
+        api: 'openai-responses',
       }),
     );
     expect(mocks.updateAgentModelProvider).toHaveBeenCalledWith(
@@ -175,7 +173,7 @@ describe('provider-runtime-sync refresh strategy', () => {
           expect.objectContaining({
             id: 'gpt-5.5',
             reasoning: true,
-            compat: { supportedReasoningEfforts: ['low', 'high'] },
+            compat: { supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh'] },
           }),
         ],
       }),

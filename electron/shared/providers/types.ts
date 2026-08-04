@@ -99,6 +99,14 @@ export function assertValidApiProtocol(
 export type ProviderProtocol = OpenClawApiProtocol;
 export type ProviderReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
 
+/** Fixed effort ladder written for every custom-provider primary model. */
+export const CUSTOM_PROVIDER_DEFAULT_REASONING_EFFORTS: ProviderReasoningEffort[] = [
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+];
+
 export type ProviderAuthMode =
   | 'api_key'
   | 'oauth_device'
