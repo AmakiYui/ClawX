@@ -24,6 +24,7 @@ touchedAreas:
   - src/stores/chat/session-catalog.ts
   - src/stores/providers.ts
   - src/pages/Chat/ChatInput.tsx
+  - src/pages/Chat/index.tsx
   - shared/i18n/locales/**/chat.json
   - tests/unit/session-catalog.test.ts
   - tests/unit/provider-model-capabilities.test.ts
@@ -47,6 +48,7 @@ expectedUserBehavior:
   - A new local draft can use the current agent's Gateway-advertised session defaults before its first prompt creates a persisted session row.
   - Reasoning effort opens in a dedicated submenu without a separate Thinking toggle.
   - Selecting Off, Low, Medium, or High persists that explicit current-session override through Gateway sessions.patch.
+  - Each ACP prompt carries the same explicit reasoning effort selected for its current session instead of falling back to a different prompt-level effort.
   - A message cannot be sent while an effort change is still being applied.
   - A provider-side aborted prompt that was not cancelled by the user surfaces a localized retryable error instead of ending silently.
 requiredProfiles:
@@ -81,6 +83,7 @@ acceptance:
   - A local draft falls back only to agent-scoped sessions.list defaults, and a persisted session row always takes precedence.
   - Custom-provider primary models are synced with a fixed OpenClaw reasoning ladder; provider settings do not expose enable-reasoning controls.
   - Explicit off is distinct from a cleared override.
+  - An explicit user-selected session level is forwarded unchanged in ACP prompt metadata; an inherited session adds no prompt-level override.
   - Failed patches restore the prior session state and leave the message available to send.
   - New labels are localized in English, Chinese, Japanese, and Russian.
   - Focused tests, harness validation, communication replay, and communication compare pass.
@@ -93,9 +96,10 @@ docs:
 - Project Gateway session thinking metadata into the Chat session catalog.
 - Add a combined model and reasoning-effort picker to the composer.
 - Persist current-session overrides with `sessions.patch`.
+- Forward the explicit current-session selection through ACP prompt metadata so prompt execution uses that exact level.
 
 ## Out Of Scope
 
-- Adding per-message or per-agent thinking defaults.
+- Adding an independently selectable per-message or per-agent thinking default.
 - Maintaining a model/provider capability table in ClawX.
-- Changing ACP prompt payloads or OpenClaw reasoning semantics.
+- Changing OpenClaw reasoning semantics.

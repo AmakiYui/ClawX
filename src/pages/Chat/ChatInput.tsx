@@ -48,7 +48,12 @@ export interface ChatWorkspaceOption {
 }
 
 interface ChatInputProps {
-  onSend: (text: string, attachments?: FileAttachment[], targetAgentId?: string | null) => void;
+  onSend: (
+    text: string,
+    attachments?: FileAttachment[],
+    targetAgentId?: string | null,
+    thinkingLevel?: string,
+  ) => void;
   onStop?: () => void;
   disabled?: boolean;
   sending?: boolean;
@@ -807,12 +812,17 @@ export function ChatInput({
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
-    onSend(textToSend, attachmentsToSend, targetAgentId);
+    onSend(
+      textToSend,
+      attachmentsToSend,
+      targetAgentId,
+      currentSession?.thinkingLevel?.trim() || undefined,
+    );
     setTargetAgentId(null);
     setPickerOpen(false);
     setSkillPickerOpen(false);
     setWorkspaceMenuOpen(false);
-  }, [input, attachments, canSend, onSend, targetAgentId]);
+  }, [input, attachments, canSend, currentSession?.thinkingLevel, onSend, targetAgentId]);
 
   const handleStop = useCallback(() => {
     if (!canStop) return;

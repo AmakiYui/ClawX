@@ -1097,7 +1097,7 @@ describe('ChatInput agent targeting', () => {
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Hello direct agent' } });
     fireEvent.click(screen.getByTitle('Send'));
 
-    expect(onSend).toHaveBeenCalledWith('Hello direct agent', undefined, 'research');
+    expect(onSend).toHaveBeenCalledWith('Hello direct agent', undefined, 'research', undefined);
   });
 
   it('keeps the ACP composer enabled while gateway is running but not yet ready', () => {
@@ -1149,6 +1149,10 @@ describe('ChatInput agent targeting', () => {
       { id: 'bbbbbbbb', name: 'Beta', type: 'custom', hasKey: true, keyMasked: 'sk-***', enabled: true, createdAt: now, updatedAt: now },
     ];
     providersState.defaultAccountId = 'aaaaaaaa';
+    chatState.sessions = [{
+      key: chatState.currentSessionKey,
+      thinkingLevel: 'high',
+    }];
 
     renderChatInput(onSend);
 
@@ -1160,7 +1164,7 @@ describe('ChatInput agent targeting', () => {
     fireEvent.change(input, { target: { value: 'Send through ACP' } });
     fireEvent.click(screen.getByTitle('Send'));
 
-    expect(onSend).toHaveBeenCalledWith('Send through ACP', undefined, null);
+    expect(onSend).toHaveBeenCalledWith('Send through ACP', undefined, null, 'high');
   });
 
   it('shows starting status while gateway is running but not yet ready', () => {
@@ -1267,7 +1271,7 @@ describe('ChatInput agent targeting', () => {
 
     fireEvent.click(screen.getByTitle('Send'));
 
-    expect(onSend).toHaveBeenCalledWith('Draft /create-skill  a new helper', undefined, null);
+    expect(onSend).toHaveBeenCalledWith('Draft /create-skill  a new helper', undefined, null, undefined);
     expect(hostApiFetchMock).toHaveBeenCalledWith(
       '/api/skills/quick-access',
       expect.objectContaining({

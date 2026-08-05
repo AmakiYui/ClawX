@@ -312,16 +312,17 @@ test.describe('ClawX chat model picker', () => {
       await expect(page.getByTestId('chat-thinking-toggle')).toHaveCount(0);
       await page.getByTestId('chat-reasoning-effort-option-high').click();
       await expect(page.getByTestId('chat-model-picker-button')).toContainText('provider/model-beta (Beta) · High');
-      await page.getByTestId('chat-model-picker-button').click();
-      await page.getByTestId('chat-reasoning-effort-menu-trigger').click();
-      await page.getByTestId('chat-reasoning-effort-option-off').click();
-      await expect(page.getByTestId('chat-model-picker-button')).toContainText('provider/model-beta (Beta) · Off');
 
       await page.getByTestId('chat-composer-input').fill('Trigger an aborted model request');
       await page.getByTestId('chat-composer-send').click();
       await expect(page.getByText(
         'The model request ended before producing a response. Please try again.',
       )).toBeVisible();
+
+      await page.getByTestId('chat-model-picker-button').click();
+      await page.getByTestId('chat-reasoning-effort-menu-trigger').click();
+      await page.getByTestId('chat-reasoning-effort-option-off').click();
+      await expect(page.getByTestId('chat-model-picker-button')).toContainText('provider/model-beta (Beta) · Off');
 
       const requests = await app.evaluate(() => (
         (globalThis as typeof globalThis & { __chatModelPickerRequests?: Array<{ path: string; method: string; body: unknown }> }).__chatModelPickerRequests ?? []
@@ -341,6 +342,17 @@ test.describe('ClawX chat model picker', () => {
         method: 'RPC',
         body: { key: 'agent:main:main', thinkingLevel: 'off' },
       });
+      expect(requests).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          path: 'chat:sendAcpPrompt',
+          method: 'HOST',
+          body: expect.objectContaining({
+            sessionKey: 'agent:main:main',
+            message: 'Trigger an aborted model request',
+            thinkingLevel: 'high',
+          }),
+        }),
+      ]));
       expect(requests.some((request) =>
         request.path === '/api/gateway/restart'
         || request.path === '/api/gateway/start'

@@ -225,7 +225,7 @@ describe('AcpChatService', () => {
     expect(connection.loadSession).not.toHaveBeenCalled();
   });
 
-  it('routes fresh-session prompts through the ACP session id returned by session/new', async () => {
+  it('routes fresh-session prompts with the user-selected thinking level', async () => {
     const { service, connection } = await createService();
 
     await service.loadSession({ sessionKey: 'agent:pi:session-123', workspaceRoot: '/repo', cwd: '/repo', createIfMissing: true });
@@ -234,12 +234,18 @@ describe('AcpChatService', () => {
       cwd: '/repo',
       message: 'hello',
       messageId: 'msg-1',
+      thinkingLevel: 'high',
     })).resolves.toEqual({ success: true, generation: 1 });
 
     expect(connection.prompt).toHaveBeenCalledWith({
       sessionId: 'acp-session-1',
       prompt: [{ type: 'text', text: 'hello' }],
-      _meta: { sessionKey: 'agent:pi:session-123', prefixCwd: true, messageId: 'msg-1' },
+      _meta: {
+        sessionKey: 'agent:pi:session-123',
+        prefixCwd: true,
+        messageId: 'msg-1',
+        thinkingLevel: 'high',
+      },
     });
   });
 

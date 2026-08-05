@@ -779,55 +779,66 @@ test.describe('ClawX ACP inline timeline', () => {
     }
   });
 
-  test('auto-collapses completed tool cards and respects manual override', async ({ launchElectronApp }) => {
+  test('hides tool activity during a response, then reveals every tool collapsed', async ({ launchElectronApp }) => {
     const app = await launchElectronApp({ skipSetup: true });
 
     try {
       await installAcpChatMocks(app);
+      await installAcpPromptDeferredMock(app);
       const page = await openChat(app);
       await expect(page.getByTestId('acp-chat-empty-state')).toBeVisible({ timeout: 30_000 });
 
+      await page.getByTestId('chat-composer-input').fill('Use multiple tools');
+      await page.getByTestId('chat-composer-send').click();
       await emitAcpSessionUpdates(app, [
         {
           sessionUpdate: 'tool_call',
-          toolCallId: 'collapse-tool',
-          title: 'Collapsible tool',
+          toolCallId: 'collapse-tool-1',
+          title: 'First collapsible tool',
           status: 'in_progress',
-          content: [{ type: 'content', content: { type: 'text', text: 'collapsible output' } }],
+          content: [{ type: 'content', content: { type: 'text', text: 'first output' } }],
+          locations: [],
+        },
+        {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'collapse-tool-2',
+          title: 'Second collapsible tool',
+          status: 'in_progress',
+          content: [{ type: 'content', content: { type: 'text', text: 'second output' } }],
           locations: [],
         },
       ]);
 
-      const card = page.getByTestId('acp-tool-call-card');
-      await expect(card).toHaveAttribute('data-expanded', 'true', { timeout: 30_000 });
+      await expect(page.getByTestId('acp-tool-calls-group')).toHaveCount(0);
+      await expect(page.getByTestId('acp-tool-call-card')).toHaveCount(0);
 
       await emitAcpSessionUpdates(app, [
         {
           sessionUpdate: 'tool_call_update',
-          toolCallId: 'collapse-tool',
+          toolCallId: 'collapse-tool-1',
           status: 'completed',
-          content: [{ type: 'content', content: { type: 'text', text: 'collapsible output' } }],
+          content: [{ type: 'content', content: { type: 'text', text: 'first output' } }],
           locations: [],
         },
-      ]);
-
-      await expect(card).toHaveAttribute('data-expanded', 'false', { timeout: 30_000 });
-
-      await page.getByTestId('acp-tool-toggle').click();
-      await expect(card).toHaveAttribute('data-expanded', 'true');
-
-      await emitAcpSessionUpdates(app, [
         {
           sessionUpdate: 'tool_call_update',
-          toolCallId: 'collapse-tool',
+          toolCallId: 'collapse-tool-2',
           status: 'completed',
-          content: [{ type: 'content', content: { type: 'text', text: 'collapsible output after override' } }],
+          content: [{ type: 'content', content: { type: 'text', text: 'second output' } }],
           locations: [],
         },
       ]);
+      await expect(page.getByTestId('acp-tool-calls-group')).toHaveCount(0);
 
-      await page.waitForTimeout(1_200);
-      await expect(card).toHaveAttribute('data-expanded', 'true');
+      await resolveDeferredAcpPrompt(app);
+
+      const group = page.getByTestId('acp-tool-calls-group');
+      await expect(group).toHaveCount(1, { timeout: 30_000 });
+      await expect(group).toHaveAttribute('data-collapsed', 'true');
+      await expect(page.getByTestId('acp-tool-call-card')).toHaveCount(0);
+
+      await expandAcpToolCallsGroup(page);
+      await expect(page.getByTestId('acp-tool-call-card')).toHaveCount(2);
     } finally {
       await closeElectronApp(app);
     }

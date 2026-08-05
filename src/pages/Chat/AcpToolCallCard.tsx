@@ -39,11 +39,19 @@ function AcpToolOutputPart({ part }: { part: RenderPart }) {
   return <AcpRenderPart part={part} tone="process" />;
 }
 
-export function AcpToolCallCard({ item, grouped = false }: { item: ToolCallItem; grouped?: boolean }) {
+export function AcpToolCallCard({
+  item,
+  grouped = false,
+  collapsedByDefault = false,
+}: {
+  item: ToolCallItem;
+  grouped?: boolean;
+  collapsedByDefault?: boolean;
+}) {
   const { t } = useTranslation('chat');
   const hasDetails = Boolean(item.error) || item.outputParts.length > 0;
   const isFinished = item.status === 'completed' || item.status === 'failed';
-  const shouldStartExpanded = !hasDetails || !(item.historical && isFinished);
+  const shouldStartExpanded = !hasDetails || (!collapsedByDefault && !(item.historical && isFinished));
   const [expansionState, setExpansionState] = useState<ExpansionState>(() => ({
     toolCallId: item.toolCallId,
     expanded: shouldStartExpanded,
@@ -57,13 +65,13 @@ export function AcpToolCallCard({ item, grouped = false }: { item: ToolCallItem;
     if (!hasDetails) return true;
     if (manualOverride) return currentExpansionState.expanded;
     if (item.historical && isFinished) return false;
-    if (!isFinished) return true;
+    if (!isFinished && !collapsedByDefault) return true;
     return currentExpansionState.expanded;
   })();
 
   useEffect(() => {
     if (manualOverride) return;
-    if (!hasDetails || item.historical || !isFinished) return;
+    if (!hasDetails || collapsedByDefault || item.historical || !isFinished) return;
 
     const timer = window.setTimeout(() => {
       setExpansionState((state) => {
@@ -75,7 +83,7 @@ export function AcpToolCallCard({ item, grouped = false }: { item: ToolCallItem;
       });
     }, TOOL_AUTO_COLLAPSE_DELAY_MS);
     return () => window.clearTimeout(timer);
-  }, [hasDetails, item.historical, isFinished, item.toolCallId, manualOverride, shouldStartExpanded]);
+  }, [collapsedByDefault, hasDetails, item.historical, isFinished, item.toolCallId, manualOverride, shouldStartExpanded]);
 
   const toggleLabel = expanded ? t('acp.collapseTool') : t('acp.expandTool');
 

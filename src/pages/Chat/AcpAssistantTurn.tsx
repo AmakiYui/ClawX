@@ -133,6 +133,8 @@ export function AcpAssistantTurn({
 }) {
   const clipboardText = useMemo(() => assistantTurnClipboardText(group), [group]);
   const renderItems = useMemo(() => partitionTurnItems(group.items), [group.items]);
+  const hideToolPresentation = timing?.status === 'running';
+  const collapseSingleToolsByDefault = timing?.status === 'complete';
 
   return (
     <div data-testid="acp-assistant-turn" className="group flex w-full justify-start gap-3">
@@ -145,6 +147,7 @@ export function AcpAssistantTurn({
       <div className="flex min-w-0 flex-1 flex-col items-start gap-3">
         {renderItems.map((item) => {
           if (item.kind === 'tool-call-group') {
+            if (hideToolPresentation) return null;
             return (
               <div key={item.id} className="w-full">
                 <AcpToolCallsGroup
@@ -176,9 +179,10 @@ export function AcpAssistantTurn({
           }
 
           if (item.kind === 'tool-call') {
+            if (hideToolPresentation) return null;
             return (
               <div key={item.id} data-acp-item-id={item.id} className="-my-1 w-full">
-                <AcpToolCallCard item={item} />
+                <AcpToolCallCard item={item} collapsedByDefault={collapseSingleToolsByDefault} />
               </div>
             );
           }

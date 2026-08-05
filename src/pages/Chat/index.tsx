@@ -545,7 +545,12 @@ export function Chat() {
         </div>
 
         <ChatInput
-          onSend={(text: string, attachments?: FileAttachment[], targetAgentId?: string | null) => {
+          onSend={(
+            text: string,
+            attachments?: FileAttachment[],
+            targetAgentId?: string | null,
+            thinkingLevel?: string,
+          ) => {
             if (!currentSessionKey || !cwd || !workspaceContextAvailable) return;
             const targetAgent = targetAgentId
               ? agents.find((agent) => agent.id === targetAgentId) ?? null
@@ -554,6 +559,7 @@ export function Chat() {
               ? targetAgent.mainSessionKey || `agent:${targetAgent.id}:main`
               : currentSessionKey;
             const existingSession = sessions.find((session) => session.key === sessionKey);
+            const selectedThinkingLevel = targetAgent ? undefined : thinkingLevel?.trim();
             setLastPromptAttemptSessionKey(sessionKey);
             const promptCwd = targetAgent?.workspace || cwd;
             const media = attachments
@@ -608,6 +614,7 @@ export function Chat() {
                 cwd: promptCwd,
                 message: text,
                 media,
+                ...(selectedThinkingLevel ? { thinkingLevel: selectedThinkingLevel } : {}),
               });
               requestAnimationFrame(() => {
                 void scrollToBottom({ animation: 'instant', ignoreEscapes: true });

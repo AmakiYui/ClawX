@@ -409,7 +409,12 @@ export class AcpChatService {
         // ClawX correlation metadata in the protocol extension envelope.
         // OpenClaw must receive slash commands without its textual cwd prefix
         // so the Gateway can classify and fold command replies into chat final.
-        _meta: { sessionKey: payload.sessionKey, prefixCwd: !isSlashCommand, messageId },
+        _meta: {
+          sessionKey: payload.sessionKey,
+          prefixCwd: !isSlashCommand,
+          messageId,
+          ...(payload.thinkingLevel ? { thinkingLevel: payload.thinkingLevel } : {}),
+        },
       });
       const cancelledByClient = this.clientCancelledPromptSessions.has(payload.sessionKey);
       if (response.stopReason === 'cancelled' && !cancelledByClient) {

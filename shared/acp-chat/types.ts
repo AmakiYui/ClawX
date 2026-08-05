@@ -29,6 +29,8 @@ export type AcpChatPromptPayload = AcpSessionKeyPayload & {
   message?: string;
   media?: AcpPromptMediaItem[];
   messageId?: string;
+  /** Explicit current-session reasoning effort selected by the user. */
+  thinkingLevel?: string;
 };
 
 export type AcpChatCancelPayload = AcpSessionKeyPayload;

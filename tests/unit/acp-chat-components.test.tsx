@@ -956,7 +956,7 @@ describe('ACP chat timeline components', () => {
     expect(screen.getByText('image')).toBeInTheDocument();
   });
 
-  it('keeps a running turn tool group expanded until the turn completes', () => {
+  it('hides a live tool group, then reveals the whole group collapsed when the turn completes', () => {
     const state = snapshot({
       itemOrder: ['user-a:0', 'tool:exec-1', 'tool:image-1'],
       itemsById: {
@@ -972,16 +972,61 @@ describe('ACP chat timeline components', () => {
         'tool:image-1': toolCallItem({ id: 'tool:image-1', toolCallId: 'image-1', title: 'image', status: 'completed', outputParts: [] }),
       },
     });
-
-    render(<AcpTimeline
+    const { rerender } = render(<AcpTimeline
       snapshot={state}
       turnTimingsByUserMessageId={{
         'user-a': { source: 'live', status: 'running', startedAtMs: Date.now() - 2_000 },
       }}
     />);
 
-    expect(screen.getByTestId('acp-tool-calls-group')).toHaveAttribute('data-collapsed', 'false');
-    expect(screen.getAllByTestId('acp-tool-call-card')).toHaveLength(2);
+    expect(screen.queryByTestId('acp-tool-calls-group')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('acp-tool-call-card')).not.toBeInTheDocument();
+
+    rerender(<AcpTimeline
+      snapshot={state}
+      turnTimingsByUserMessageId={{
+        'user-a': { source: 'live', status: 'complete', durationMs: 2_000 },
+      }}
+    />);
+
+    expect(screen.getByTestId('acp-tool-calls-group')).toHaveAttribute('data-collapsed', 'true');
+    expect(screen.queryByTestId('acp-tool-call-card')).not.toBeInTheDocument();
+  });
+
+  it('hides a single live tool, then reveals its details collapsed when the turn completes', () => {
+    const state = snapshot({
+      itemOrder: ['user-a:0', 'tool:read-file'],
+      itemsById: {
+        'user-a:0': {
+          kind: 'message-segment',
+          id: 'user-a:0',
+          role: 'user',
+          messageId: 'user-a',
+          segmentIndex: 0,
+          parts: [{ kind: 'markdown', text: 'Read it' }],
+        },
+        'tool:read-file': toolCallItem({ status: 'running' }),
+      },
+    });
+    const { rerender } = render(<AcpTimeline
+      snapshot={state}
+      turnTimingsByUserMessageId={{
+        'user-a': { source: 'live', status: 'running', startedAtMs: Date.now() - 1_000 },
+      }}
+    />);
+
+    expect(screen.queryByTestId('acp-tool-call-card')).not.toBeInTheDocument();
+
+    rerender(<AcpTimeline
+      snapshot={state}
+      turnTimingsByUserMessageId={{
+        'user-a': { source: 'live', status: 'complete', durationMs: 1_000 },
+      }}
+    />);
+
+    expect(screen.getByTestId('acp-tool-call-card')).toHaveAttribute('data-expanded', 'false');
+    fireEvent.click(screen.getByTestId('acp-tool-toggle'));
+    expect(screen.getByTestId('acp-tool-call-card')).toHaveAttribute('data-expanded', 'true');
   });
 
   it('keeps completed tool results expanded until the delayed auto-collapse runs', () => {
