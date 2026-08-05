@@ -164,6 +164,9 @@ function errorMessage(error: unknown, fallback: string): string {
 }
 
 function failedOperationMessage(result: AcpChatOperationResult, fallback: string): string {
+  if (result.errorCode === 'prompt_aborted') {
+    return i18n.t('chat:acp.promptAborted');
+  }
   return result.error || fallback;
 }
 

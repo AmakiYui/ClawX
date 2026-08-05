@@ -115,10 +115,6 @@ function translate(key: string, vars?: Record<string, unknown>): string {
       return 'Default';
     case 'composer.reasoningEffortUpdateFailed':
       return `Failed to update reasoning effort: ${String(vars?.error ?? '')}`;
-    case 'composer.thinkingToggleTitle':
-      return 'Thinking';
-    case 'composer.thinkingToggleDescription':
-      return 'Use reasoning for complex tasks';
     case 'composer.clearTarget':
       return 'Clear target agent';
     case 'composer.targetChip':
@@ -714,6 +710,7 @@ describe('ChatInput agent targeting', () => {
       thinkingLevels: [
         { id: 'off', label: 'Off' },
         { id: 'minimal', label: 'Minimal' },
+        { id: 'low', label: 'Low' },
         { id: 'medium', label: 'Medium' },
         { id: 'high', label: 'High' },
         { id: 'xhigh', label: 'Extra High' },
@@ -732,8 +729,12 @@ describe('ChatInput agent targeting', () => {
     );
     expect(screen.queryByTestId('chat-reasoning-effort-option-inherited')).not.toBeInTheDocument();
     expect(screen.queryByTestId('chat-reasoning-effort-option-minimal')).not.toBeInTheDocument();
+    expect(screen.getByTestId('chat-reasoning-effort-option-off')).toHaveTextContent('Off');
+    expect(screen.getByTestId('chat-reasoning-effort-option-low')).toHaveTextContent('Low');
     expect(screen.getByTestId('chat-reasoning-effort-option-medium')).toHaveTextContent('Medium');
-    expect(screen.getByTestId('chat-reasoning-effort-option-xhigh')).toHaveTextContent('Extra High');
+    expect(screen.getByTestId('chat-reasoning-effort-option-high')).toHaveTextContent('High');
+    expect(screen.queryByTestId('chat-reasoning-effort-option-xhigh')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('chat-thinking-toggle')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('chat-reasoning-effort-option-high'));
 
@@ -852,36 +853,12 @@ describe('ChatInput agent targeting', () => {
     });
   });
 
-  it('uses the thinking toggle to turn reasoning off for the current session', async () => {
+  it('turns reasoning off by selecting Off as an effort level', async () => {
     configureAgentAndModelPickers();
     chatState.sessions = [{
       key: chatState.currentSessionKey,
       thinkingLevel: 'high',
       thinkingDefault: 'medium',
-      thinkingLevels: [
-        { id: 'off', label: 'Off' },
-        { id: 'medium', label: 'Medium' },
-        { id: 'high', label: 'High' },
-      ],
-    }];
-    chatState.updateSessionThinkingLevel.mockResolvedValue(undefined);
-
-    renderChatInput();
-    fireEvent.click(screen.getByTestId('chat-model-picker-button'));
-    fireEvent.click(screen.getByTestId('chat-reasoning-effort-menu-trigger'));
-    expect(screen.getByTestId('chat-thinking-toggle')).toBeChecked();
-    fireEvent.click(screen.getByTestId('chat-thinking-toggle'));
-
-    await waitFor(() => {
-      expect(chatState.updateSessionThinkingLevel).toHaveBeenCalledWith('agent:main:main', 'off');
-    });
-  });
-
-  it('enables thinking at medium when the runtime default is off', async () => {
-    configureAgentAndModelPickers();
-    chatState.sessions = [{
-      key: chatState.currentSessionKey,
-      thinkingDefault: 'off',
       thinkingLevels: [
         { id: 'off', label: 'Off' },
         { id: 'low', label: 'Low' },
@@ -894,11 +871,11 @@ describe('ChatInput agent targeting', () => {
     renderChatInput();
     fireEvent.click(screen.getByTestId('chat-model-picker-button'));
     fireEvent.click(screen.getByTestId('chat-reasoning-effort-menu-trigger'));
-    expect(screen.getByTestId('chat-thinking-toggle')).not.toBeChecked();
-    fireEvent.click(screen.getByTestId('chat-thinking-toggle'));
+    expect(screen.queryByTestId('chat-thinking-toggle')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('chat-reasoning-effort-option-off'));
 
     await waitFor(() => {
-      expect(chatState.updateSessionThinkingLevel).toHaveBeenCalledWith('agent:main:main', 'medium');
+      expect(chatState.updateSessionThinkingLevel).toHaveBeenCalledWith('agent:main:main', 'off');
     });
   });
 

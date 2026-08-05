@@ -25,7 +25,7 @@ user-owned and must never be modified, and non-`custom-` provider entries are
 never backfilled.
 
 Custom-provider primary model rows receive `reasoning: true` and the fixed
-effort ladder `compat.supportedReasoningEfforts: ["low","medium","high","xhigh"]`
+effort ladder `compat.supportedReasoningEfforts: ["low","medium","high"]`
 so Chat can offer session thinking controls. Provider settings must not expose
 enable-reasoning controls, and model-name inference must not invent a different
 effort list. Sync must preserve unrelated compat keys while writing this ladder.

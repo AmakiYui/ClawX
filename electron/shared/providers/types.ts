@@ -104,7 +104,6 @@ export const CUSTOM_PROVIDER_DEFAULT_REASONING_EFFORTS: ProviderReasoningEffort[
   'low',
   'medium',
   'high',
-  'xhigh',
 ];
 
 export type ProviderAuthMode =

@@ -179,7 +179,7 @@ describe('provider-runtime-sync config delivery', () => {
           expect.objectContaining({
             id: 'gpt-5.5',
             reasoning: true,
-            compat: { supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh'] },
+            compat: { supportedReasoningEfforts: ['low', 'medium', 'high'] },
           }),
         ],
       }),

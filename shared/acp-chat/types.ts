@@ -38,9 +38,12 @@ export type AcpChatRespondPermissionPayload = AcpSessionKeyPayload & {
   outcome: RequestPermissionResponse['outcome'];
 };
 
+export type AcpChatOperationErrorCode = 'prompt_aborted';
+
 export type AcpChatOperationResult = {
   success: boolean;
   error?: string;
+  errorCode?: AcpChatOperationErrorCode;
   generation?: number;
   /** The requested session still has a live prompt and was reactivated without history replay. */
   resumedActivePrompt?: boolean;

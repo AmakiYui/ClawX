@@ -12,11 +12,14 @@ touchedAreas:
   - electron/shared/providers/model-capabilities.ts
   - electron/shared/providers/types.ts
   - electron/services/providers/provider-runtime-sync.ts
+  - electron/services/acp-chat-service.ts
   - electron/utils/openclaw-auth.ts
+  - shared/acp-chat/types.ts
   - shared/chat/types.ts
   - shared/host-api/contract.ts
   - src/components/settings/ProvidersSettings.tsx
   - src/lib/providers.ts
+  - src/stores/acp-chat-session.ts
   - src/stores/chat.ts
   - src/stores/chat/session-catalog.ts
   - src/stores/providers.ts
@@ -28,6 +31,8 @@ touchedAreas:
   - tests/unit/chat-input.test.tsx
   - tests/unit/chat-store-session-label-fetch.test.ts
   - tests/unit/chat-load-sessions-startup.test.ts
+  - tests/unit/acp-chat-service.test.ts
+  - tests/unit/acp-chat-store.test.ts
   - tests/unit/gateway-events.test.ts
   - tests/unit/provider-runtime-sync.test.ts
   - tests/unit/provider-service-stale-cleanup.test.ts
@@ -38,12 +43,12 @@ touchedAreas:
   - README.ja-JP.md
 expectedUserBehavior:
   - The Chat model button shows the effective reasoning effort for the current session.
-  - The model menu offers only the thinking levels advertised by OpenClaw for the resolved model.
+  - The model menu directly offers the advertised members of the Off, Low, Medium, and High product ladder.
   - A new local draft can use the current agent's Gateway-advertised session defaults before its first prompt creates a persisted session row.
-  - Reasoning effort opens in a dedicated submenu with a current-session Thinking toggle.
-  - Selecting a level persists an explicit current-session override through Gateway sessions.patch.
-  - Disabling Thinking patches the explicit off level; enabling it restores the prior selection, a non-off runtime default, or an advertised enabled level when the runtime default is off.
+  - Reasoning effort opens in a dedicated submenu without a separate Thinking toggle.
+  - Selecting Off, Low, Medium, or High persists that explicit current-session override through Gateway sessions.patch.
   - A message cannot be sent while an effort change is still being applied.
+  - A provider-side aborted prompt that was not cancelled by the user surfaces a localized retryable error instead of ending silently.
 requiredProfiles:
   - fast
   - comms
@@ -63,6 +68,8 @@ requiredTests:
   - tests/unit/chat-input.test.tsx
   - tests/unit/chat-store-session-label-fetch.test.ts
   - tests/unit/chat-load-sessions-startup.test.ts
+  - tests/unit/acp-chat-service.test.ts
+  - tests/unit/acp-chat-store.test.ts
   - tests/unit/gateway-events.test.ts
   - tests/unit/provider-runtime-sync.test.ts
   - tests/unit/provider-service-stale-cleanup.test.ts

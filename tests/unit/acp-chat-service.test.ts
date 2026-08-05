@@ -401,6 +401,43 @@ describe('AcpChatService', () => {
     })).resolves.toEqual({ success: true, generation: 3 });
   });
 
+  it('reports an unexpected cancelled prompt as an aborted model request', async () => {
+    const connection = createConnection();
+    connection.prompt.mockResolvedValueOnce({ stopReason: 'cancelled' });
+    const { service } = await createService(connection);
+
+    await service.loadSession({ sessionKey: 'agent:pi:s1', workspaceRoot: '/repo', cwd: '/repo' });
+
+    await expect(service.sendPrompt({
+      sessionKey: 'agent:pi:s1', cwd: '/repo', message: 'please answer',
+    })).resolves.toEqual({
+      success: false,
+      error: 'ACP prompt was aborted before producing a response',
+      errorCode: 'prompt_aborted',
+    });
+  });
+
+  it('keeps an explicitly cancelled prompt successful instead of showing an error', async () => {
+    const connection = createConnection();
+    const prompt = createDeferred<{ stopReason: string }>();
+    connection.prompt.mockReturnValueOnce(prompt.promise);
+    const { service } = await createService(connection);
+
+    await service.loadSession({ sessionKey: 'agent:pi:s1', workspaceRoot: '/repo', cwd: '/repo' });
+    const sendPrompt = service.sendPrompt({
+      sessionKey: 'agent:pi:s1', cwd: '/repo', message: 'stop this',
+    });
+    await vi.waitFor(() => expect(connection.prompt).toHaveBeenCalledTimes(1));
+
+    await expect(service.cancelSession({ sessionKey: 'agent:pi:s1' })).resolves.toEqual({
+      success: true,
+      generation: 1,
+    });
+    prompt.resolve({ stopReason: 'cancelled' });
+
+    await expect(sendPrompt).resolves.toEqual({ success: true, generation: 1 });
+  });
+
   it('records ACP session load and forwarded update trace entries', async () => {
     const { clearAcpTraceForTests, getAcpTraceSnapshot } = await import('../../electron/services/acp-trace');
     clearAcpTraceForTests();

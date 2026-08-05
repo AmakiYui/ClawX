@@ -9,7 +9,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { SendHorizontal, Square, X, Paperclip, FileText, Film, Music, FileArchive, File, FolderOpen, Loader2, AtSign, Search, ChevronDown, ChevronRight, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { hostApi } from '@/lib/host-api';
@@ -64,6 +63,7 @@ interface ChatInputProps {
 // ── Helpers ──────────────────────────────────────────────────────
 
 const DIRECTORY_MIME_TYPE = 'application/x-directory';
+const SELECTABLE_THINKING_LEVEL_IDS = ['off', 'low', 'medium', 'high'] as const;
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -230,7 +230,6 @@ export function ChatInput({
   const pickerRef = useRef<HTMLDivElement>(null);
   const skillPickerRef = useRef<HTMLDivElement>(null);
   const modelPickerRef = useRef<HTMLDivElement>(null);
-  const lastEnabledThinkingLevelRef = useRef<string | null>(null);
   const workspaceMenuRef = useRef<HTMLDivElement>(null);
   const isComposingRef = useRef(false);
   const gatewayStatus = useGatewayStore((s) => s.status);
@@ -300,15 +299,15 @@ export function ChatInput({
     thinkingDefaults?.thinkingLevels,
   ]);
   const effortOptions = useMemo(
-    () => thinkingOptions.filter((option) => option.id !== 'off' && option.id !== 'minimal'),
+    () => SELECTABLE_THINKING_LEVEL_IDS.flatMap((id) => {
+      const option = thinkingOptions.find((candidate) => candidate.id === id);
+      return option ? [option] : [];
+    }),
     [thinkingOptions],
   );
-  const supportsThinkingToggle = thinkingOptions.some((option) => option.id === 'off')
-    && effortOptions.length > 0;
   const effectiveThinkingLevel = currentSession?.thinkingLevel
     ?? currentSession?.thinkingDefault
     ?? (canUseThinkingDefaults ? thinkingDefaults?.thinkingDefault : undefined);
-  const thinkingEnabled = effectiveThinkingLevel !== 'off';
   const currentThinkingLabel = useMemo(() => {
     if (!canConfigureThinking || !effectiveThinkingLevel) {
       return '';
@@ -338,7 +337,7 @@ export function ChatInput({
     );
   }, [quickSkills, skillQuery]);
   const showAgentPicker = mentionableAgents.length > 0;
-  const showModelPicker = modelOptions.length > 1 || thinkingOptions.length > 0;
+  const showModelPicker = modelOptions.length > 1 || effortOptions.length > 0;
   const chatComposerStatusComponents = rendererExtensionRegistry.getChatComposerStatusComponents();
   const isGatewayUsable = gatewayStatus.state === 'running' && gatewayStatus.gatewayReady !== false;
   const inputDisabled = disabled;
@@ -382,11 +381,6 @@ export function ChatInput({
   useEffect(() => {
     if (!modelPickerOpen) setReasoningMenuOpen(false);
   }, [modelPickerOpen]);
-
-  useEffect(() => {
-    if (!effectiveThinkingLevel || effectiveThinkingLevel === 'off') return;
-    lastEnabledThinkingLevelRef.current = currentSession?.thinkingLevel ?? null;
-  }, [currentSession?.thinkingLevel, currentSessionKey, effectiveThinkingLevel]);
 
   useEffect(() => {
     if (workspaceSelectorDisabled) {
@@ -606,34 +600,6 @@ export function ChatInput({
     switchingThinkingLevel,
     t,
     updateSessionThinkingLevel,
-  ]);
-
-  const handleToggleThinking = useCallback((enabled: boolean) => {
-    if (!enabled) {
-      if (effectiveThinkingLevel !== 'off') {
-        lastEnabledThinkingLevelRef.current =
-          currentSession?.thinkingLevel ?? currentSession?.thinkingDefault ?? null;
-      }
-      void handleSelectThinkingLevel('off');
-      return;
-    }
-    const runtimeDefault = currentSession?.thinkingDefault
-      ?? (canUseThinkingDefaults ? thinkingDefaults?.thinkingDefault : undefined);
-    void handleSelectThinkingLevel(
-      lastEnabledThinkingLevelRef.current
-        ?? (runtimeDefault && runtimeDefault !== 'off' ? runtimeDefault : null)
-        ?? effortOptions.find((option) => option.id === 'medium')?.id
-        ?? effortOptions[0]?.id
-        ?? null,
-    );
-  }, [
-    canUseThinkingDefaults,
-    currentSession?.thinkingDefault,
-    currentSession?.thinkingLevel,
-    effectiveThinkingLevel,
-    effortOptions,
-    handleSelectThinkingLevel,
-    thinkingDefaults?.thinkingDefault,
   ]);
 
   const handleWorkspaceButtonClick = useCallback(() => {
@@ -1303,7 +1269,7 @@ export function ChatInput({
                           ))}
                         </>
                       )}
-                      {thinkingOptions.length > 0 && (
+                      {effortOptions.length > 0 && (
                         <>
                           {modelOptions.length > 1 && <div className="mx-2 my-1.5 h-px bg-border" />}
                           <button
@@ -1353,22 +1319,6 @@ export function ChatInput({
                             )}
                           </button>
                         ))}
-                        {supportsThinkingToggle && (
-                          <div className="mx-2 mt-1 flex items-center justify-between gap-3 border-t border-border px-1 py-2">
-                            <div className="min-w-0">
-                              <p className="text-sm font-medium">{t('composer.thinkingToggleTitle')}</p>
-                              <p className="truncate text-xs text-muted-foreground">
-                                {t('composer.thinkingToggleDescription')}
-                              </p>
-                            </div>
-                            <Switch
-                              checked={thinkingEnabled}
-                              onCheckedChange={handleToggleThinking}
-                              disabled={switchingThinkingLevel}
-                              data-testid="chat-thinking-toggle"
-                            />
-                          </div>
-                        )}
                       </div>
                     )}
                   </div>

@@ -16,6 +16,7 @@ import { HOST_EVENT_CHANNELS } from '@shared/host-events/contract';
 import type {
   AcpChatCancelPayload,
   AcpChatLoadPayload,
+  AcpChatOperationErrorCode,
   AcpChatOperationResult,
   AcpChatPromptPayload,
   AcpChatRespondPermissionPayload,
@@ -69,8 +70,12 @@ function ok(generation?: number, sessionUpdates?: AcpSessionUpdateEnvelope[]): A
   };
 }
 
-function fail(error: unknown): AcpChatOperationResult {
-  return { success: false, error: error instanceof Error ? error.message : String(error) };
+function fail(error: unknown, errorCode?: AcpChatOperationErrorCode): AcpChatOperationResult {
+  return {
+    success: false,
+    error: error instanceof Error ? error.message : String(error),
+    ...(errorCode ? { errorCode } : {}),
+  };
 }
 
 function cancelledPermissionResponse(): RequestPermissionResponse {
@@ -143,6 +148,7 @@ export class AcpChatService {
   private loadQueue: Promise<void> | null = null;
   private activeLoadBatch: AcpSessionLoadBatch | null = null;
   private readonly livePrompts = new Map<string, AcpLivePromptContext>();
+  private readonly clientCancelledPromptSessions = new Set<string>();
   private permissionSeq = 0;
   private readonly permissionWaiters = new Map<string, PermissionWaiter>();
   readonly client: Client;
@@ -371,6 +377,7 @@ export class AcpChatService {
       generation,
       accessGrant,
     };
+    this.clientCancelledPromptSessions.delete(payload.sessionKey);
     this.livePrompts.set(payload.sessionKey, promptContext);
     try {
       const promptCwd = payload.cwd === accessGrant.executionCwd
@@ -395,7 +402,7 @@ export class AcpChatService {
       this.permissionsEnabled = true;
       const messageId = payload.messageId ?? randomUUID();
       const isSlashCommand = payload.message?.trimStart().startsWith('/') === true;
-      await connection.prompt({
+      const response = await connection.prompt({
         sessionId: acpSessionId,
         prompt,
         // ACP 1.1 removed messageId from the PromptRequest wire shape. Keep
@@ -404,10 +411,21 @@ export class AcpChatService {
         // so the Gateway can classify and fold command replies into chat final.
         _meta: { sessionKey: payload.sessionKey, prefixCwd: !isSlashCommand, messageId },
       });
+      const cancelledByClient = this.clientCancelledPromptSessions.has(payload.sessionKey);
+      if (response.stopReason === 'cancelled' && !cancelledByClient) {
+        const error = 'ACP prompt was aborted before producing a response';
+        logger.warn(`[acp-chat] ${error}`);
+        this.trace('session/prompt:failed', {
+          sessionKey: payload.sessionKey,
+          generation,
+          details: { error, stopReason: response.stopReason },
+        });
+        return fail(error, 'prompt_aborted');
+      }
       this.trace('session/prompt:success', {
         sessionKey: payload.sessionKey,
         generation,
-        details: { blockCount: prompt.length, acpSessionId },
+        details: { blockCount: prompt.length, acpSessionId, stopReason: response.stopReason },
       });
       return ok(generation);
     } catch (error) {
@@ -422,6 +440,7 @@ export class AcpChatService {
         this.livePrompts.delete(payload.sessionKey);
         this.resolvePermissionWaitersForSession(payload.sessionKey, cancelledPermissionResponse());
       }
+      this.clientCancelledPromptSessions.delete(payload.sessionKey);
       this.permissionsEnabled = this.activeSessionKey != null && this.livePrompts.has(this.activeSessionKey);
     }
   }
@@ -430,6 +449,8 @@ export class AcpChatService {
     if (!isValidSessionKey(payload.sessionKey)) return fail('Invalid ACP cancel payload');
     if (payload.sessionKey !== this.activeSessionKey || !this.loadedAcpSessionId) return fail('ACP session is not loaded');
 
+    const hasLivePrompt = this.livePrompts.has(payload.sessionKey);
+    if (hasLivePrompt) this.clientCancelledPromptSessions.add(payload.sessionKey);
     try {
       this.trace('session/cancel:start', { sessionKey: payload.sessionKey });
       const connection = await this.ensureConnection();
@@ -439,6 +460,7 @@ export class AcpChatService {
       this.trace('session/cancel:success', { sessionKey: payload.sessionKey });
       return ok(this.generation);
     } catch (error) {
+      if (hasLivePrompt) this.clientCancelledPromptSessions.delete(payload.sessionKey);
       logger.error(`[acp-chat] cancel failed: ${String(error)}`);
       this.trace('session/cancel:failed', {
         sessionKey: payload.sessionKey,
@@ -593,6 +615,7 @@ export class AcpChatService {
     this.historicalGeneration = null;
     this.permissionsEnabled = false;
     this.livePrompts.clear();
+    this.clientCancelledPromptSessions.clear();
   }
 
   private emitSessionUpdate(notification: SessionNotification): void {

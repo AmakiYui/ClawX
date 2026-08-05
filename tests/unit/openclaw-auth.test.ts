@@ -1043,7 +1043,7 @@ describe('syncProviderConfigToOpenClaw', () => {
         contextWindow: 200000,
         customField: 'keep-me',
         compat: {
-          supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
+          supportedReasoningEfforts: ['low', 'medium', 'high'],
         },
       }),
     ]);
@@ -1069,7 +1069,7 @@ describe('syncProviderConfigToOpenClaw', () => {
         input: ['text'],
         reasoning: true,
         compat: {
-          supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
+          supportedReasoningEfforts: ['low', 'medium', 'high'],
         },
       }),
     ]);
@@ -1115,7 +1115,7 @@ describe('syncProviderConfigToOpenClaw', () => {
         reasoning: true,
         compat: {
           customFlag: true,
-          supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
+          supportedReasoningEfforts: ['low', 'medium', 'high'],
         },
       }),
     ]);

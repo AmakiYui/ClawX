@@ -19,7 +19,6 @@ test.describe('ClawX chat model picker', () => {
           { id: 'low', label: 'Low' },
           { id: 'medium', label: 'Medium' },
           { id: 'high', label: 'High' },
-          { id: 'xhigh', label: 'Extra High' },
         ];
         const hostRequests: Array<{ path: string; method: string; body: unknown }> = [];
         const now = new Date().toISOString();
@@ -123,6 +122,13 @@ test.describe('ClawX chat model picker', () => {
           }
           if (request?.module === 'chat' && request.action === 'loadAcpSession') {
             return makeResponse(request.id, { success: true, generation: 1 });
+          }
+          if (request?.module === 'chat' && request.action === 'sendAcpPrompt') {
+            return makeResponse(request.id, {
+              success: false,
+              error: 'ACP prompt was aborted before producing a response',
+              errorCode: 'prompt_aborted',
+            });
           }
           if (request?.module === 'gateway' && request.action === 'rpc') {
             const method = typeof body?.method === 'string' ? body.method : '';
@@ -299,14 +305,23 @@ test.describe('ClawX chat model picker', () => {
       await expect(page.getByTestId('chat-model-picker-button')).toContainText('provider/model-beta (Beta)');
       await page.getByTestId('chat-model-picker-button').click();
       await page.getByTestId('chat-reasoning-effort-menu-trigger').click();
-      await expect(page.getByTestId('chat-model-picker-menu')).toContainText('Extra High');
-      await page.getByTestId('chat-reasoning-effort-option-xhigh').click();
-      await expect(page.getByTestId('chat-model-picker-button')).toContainText('provider/model-beta (Beta) · Extra High');
+      await expect(page.getByTestId('chat-reasoning-effort-option-off')).toHaveText('Off');
+      await expect(page.getByTestId('chat-reasoning-effort-option-low')).toHaveText('Low');
+      await expect(page.getByTestId('chat-reasoning-effort-option-medium')).toHaveText('Medium');
+      await expect(page.getByTestId('chat-reasoning-effort-option-high')).toHaveText('High');
+      await expect(page.getByTestId('chat-thinking-toggle')).toHaveCount(0);
+      await page.getByTestId('chat-reasoning-effort-option-high').click();
+      await expect(page.getByTestId('chat-model-picker-button')).toContainText('provider/model-beta (Beta) · High');
       await page.getByTestId('chat-model-picker-button').click();
       await page.getByTestId('chat-reasoning-effort-menu-trigger').click();
-      await expect(page.getByTestId('chat-thinking-toggle')).toBeChecked();
-      await page.getByTestId('chat-thinking-toggle').click();
+      await page.getByTestId('chat-reasoning-effort-option-off').click();
       await expect(page.getByTestId('chat-model-picker-button')).toContainText('provider/model-beta (Beta) · Off');
+
+      await page.getByTestId('chat-composer-input').fill('Trigger an aborted model request');
+      await page.getByTestId('chat-composer-send').click();
+      await expect(page.getByText(
+        'The model request ended before producing a response. Please try again.',
+      )).toBeVisible();
 
       const requests = await app.evaluate(() => (
         (globalThis as typeof globalThis & { __chatModelPickerRequests?: Array<{ path: string; method: string; body: unknown }> }).__chatModelPickerRequests ?? []
@@ -319,7 +334,7 @@ test.describe('ClawX chat model picker', () => {
       expect(requests).toContainEqual({
         path: 'gateway:sessions.patch',
         method: 'RPC',
-        body: { key: 'agent:main:main', thinkingLevel: 'xhigh' },
+        body: { key: 'agent:main:main', thinkingLevel: 'high' },
       });
       expect(requests).toContainEqual({
         path: 'gateway:sessions.patch',
