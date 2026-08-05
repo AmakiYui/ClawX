@@ -15,6 +15,7 @@ const { agentsState, chatState, gatewayState, providersState, artifactPanelMocks
     currentAgentId: 'main',
     currentSessionKey: 'agent:main:main',
     sessions: [] as Array<Record<string, unknown>>,
+    thinkingDefaults: null as Record<string, unknown> | null,
     thinkingLevelUpdatingSessionKey: null as string | null,
     updateSessionThinkingLevel: vi.fn(),
   },
@@ -246,6 +247,7 @@ describe('ChatInput agent targeting', () => {
     chatState.currentAgentId = 'main';
     chatState.currentSessionKey = 'agent:main:main';
     chatState.sessions = [];
+    chatState.thinkingDefaults = null;
     chatState.thinkingLevelUpdatingSessionKey = null;
     chatState.updateSessionThinkingLevel.mockReset();
     gatewayState.status = { state: 'running', port: 18789 };
@@ -740,6 +742,32 @@ describe('ChatInput agent targeting', () => {
     });
   });
 
+  it('shows Gateway agent defaults for a custom-model draft not yet listed as a session', () => {
+    configureAgentAndModelPickers();
+    chatState.sessions = [{
+      key: chatState.currentSessionKey,
+      createdLocally: true,
+    }];
+    chatState.thinkingDefaults = {
+      agentId: 'main',
+      modelProvider: 'custom-aaaaaaaa',
+      model: 'gpt-a',
+      thinkingDefault: 'medium',
+      thinkingLevels: [
+        { id: 'off', label: 'Off' },
+        { id: 'low', label: 'Low' },
+        { id: 'medium', label: 'Medium' },
+        { id: 'high', label: 'High' },
+      ],
+    };
+
+    renderChatInput();
+
+    expect(screen.getByTestId('chat-model-picker-button')).toHaveTextContent('gpt-a (Alpha) · Medium');
+    fireEvent.click(screen.getByTestId('chat-model-picker-button'));
+    expect(screen.getByTestId('chat-reasoning-effort-menu-trigger')).toBeInTheDocument();
+  });
+
   it('does not expose reasoning controls for a non-custom model', () => {
     configureAgentAndModelPickers();
     const now = '2025-01-01T00:00:00.000Z';
@@ -846,6 +874,31 @@ describe('ChatInput agent targeting', () => {
 
     await waitFor(() => {
       expect(chatState.updateSessionThinkingLevel).toHaveBeenCalledWith('agent:main:main', 'off');
+    });
+  });
+
+  it('enables thinking at medium when the runtime default is off', async () => {
+    configureAgentAndModelPickers();
+    chatState.sessions = [{
+      key: chatState.currentSessionKey,
+      thinkingDefault: 'off',
+      thinkingLevels: [
+        { id: 'off', label: 'Off' },
+        { id: 'low', label: 'Low' },
+        { id: 'medium', label: 'Medium' },
+        { id: 'high', label: 'High' },
+      ],
+    }];
+    chatState.updateSessionThinkingLevel.mockResolvedValue(undefined);
+
+    renderChatInput();
+    fireEvent.click(screen.getByTestId('chat-model-picker-button'));
+    fireEvent.click(screen.getByTestId('chat-reasoning-effort-menu-trigger'));
+    expect(screen.getByTestId('chat-thinking-toggle')).not.toBeChecked();
+    fireEvent.click(screen.getByTestId('chat-thinking-toggle'));
+
+    await waitFor(() => {
+      expect(chatState.updateSessionThinkingLevel).toHaveBeenCalledWith('agent:main:main', 'medium');
     });
   });
 

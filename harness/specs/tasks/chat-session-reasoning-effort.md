@@ -27,6 +27,8 @@ touchedAreas:
   - tests/unit/openclaw-auth.test.ts
   - tests/unit/chat-input.test.tsx
   - tests/unit/chat-store-session-label-fetch.test.ts
+  - tests/unit/chat-load-sessions-startup.test.ts
+  - tests/unit/gateway-events.test.ts
   - tests/unit/provider-runtime-sync.test.ts
   - tests/unit/provider-service-stale-cleanup.test.ts
   - tests/e2e/chat-model-picker.spec.ts
@@ -37,9 +39,10 @@ touchedAreas:
 expectedUserBehavior:
   - The Chat model button shows the effective reasoning effort for the current session.
   - The model menu offers only the thinking levels advertised by OpenClaw for the resolved model.
+  - A new local draft can use the current agent's Gateway-advertised session defaults before its first prompt creates a persisted session row.
   - Reasoning effort opens in a dedicated submenu with a current-session Thinking toggle.
   - Selecting a level persists an explicit current-session override through Gateway sessions.patch.
-  - Disabling Thinking patches the explicit off level; enabling it restores the prior selection or runtime default.
+  - Disabling Thinking patches the explicit off level; enabling it restores the prior selection, a non-off runtime default, or an advertised enabled level when the runtime default is off.
   - A message cannot be sent while an effort change is still being applied.
 requiredProfiles:
   - fast
@@ -59,6 +62,8 @@ requiredTests:
   - tests/unit/openclaw-auth.test.ts
   - tests/unit/chat-input.test.tsx
   - tests/unit/chat-store-session-label-fetch.test.ts
+  - tests/unit/chat-load-sessions-startup.test.ts
+  - tests/unit/gateway-events.test.ts
   - tests/unit/provider-runtime-sync.test.ts
   - tests/unit/provider-service-stale-cleanup.test.ts
   - tests/e2e/chat-model-picker.spec.ts
@@ -66,6 +71,7 @@ requiredTests:
 acceptance:
   - Renderer uses the typed host-api Gateway RPC boundary and never opens its own Gateway transport.
   - thinkingLevels, thinkingDefault, and thinkingLevel remain Gateway-owned session metadata.
+  - A local draft falls back only to agent-scoped sessions.list defaults, and a persisted session row always takes precedence.
   - Custom-provider primary models are synced with a fixed OpenClaw reasoning ladder; provider settings do not expose enable-reasoning controls.
   - Explicit off is distinct from a cleared override.
   - Failed patches restore the prior session state and leave the message available to send.

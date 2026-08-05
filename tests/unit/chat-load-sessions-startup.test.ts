@@ -113,6 +113,88 @@ describe('chat session catalog startup', () => {
     });
   });
 
+  it('retains agent-scoped thinking defaults for a local draft session', async () => {
+    gatewayRpcMock.mockResolvedValue({
+      ts: 1,
+      defaults: {
+        modelProvider: 'custom-aaaaaaaa',
+        model: 'gpt-a',
+        thinkingDefault: 'medium',
+        thinkingLevels: [
+          { id: 'off', label: 'Off' },
+          { id: 'medium', label: 'Medium' },
+          { id: 'high', label: 'High' },
+        ],
+      },
+      sessions: [],
+    });
+
+    const { useChatStore } = await import('@/stores/chat');
+    useChatStore.setState({
+      currentSessionKey: 'agent:main:session-draft',
+      currentAgentId: 'main',
+      sessions: [{ key: 'agent:main:session-draft', createdLocally: true }],
+    });
+
+    await useChatStore.getState().loadSessions({ force: true });
+
+    expect(useChatStore.getState().thinkingDefaults).toEqual({
+      agentId: 'main',
+      modelProvider: 'custom-aaaaaaaa',
+      model: 'gpt-a',
+      thinkingDefault: 'medium',
+      thinkingLevels: [
+        { id: 'off', label: 'Off' },
+        { id: 'medium', label: 'Medium' },
+        { id: 'high', label: 'High' },
+      ],
+    });
+  });
+
+  it('loads non-main draft defaults without scoping the sidebar catalog request', async () => {
+    gatewayRpcMock.mockImplementation(async (_method: string, params?: Record<string, unknown>) => {
+      if (params?.agentId === 'research') {
+        return {
+          defaults: {
+            modelProvider: 'custom-research',
+            model: 'reasoner',
+            thinkingDefault: 'high',
+            thinkingLevels: [
+              { id: 'off', label: 'Off' },
+              { id: 'high', label: 'High' },
+            ],
+          },
+          sessions: [],
+        };
+      }
+      return { ts: 1, sessions: [] };
+    });
+
+    const { useChatStore } = await import('@/stores/chat');
+    useChatStore.setState({
+      currentSessionKey: 'agent:research:session-draft',
+      currentAgentId: 'research',
+      sessions: [{ key: 'agent:research:session-draft', createdLocally: true }],
+    });
+
+    await useChatStore.getState().loadSessions({ force: true });
+
+    expect(gatewayRpcMock).toHaveBeenNthCalledWith(1, 'sessions.list', {
+      includeDerivedTitles: true,
+      includeLastMessage: true,
+    });
+    expect(gatewayRpcMock).toHaveBeenNthCalledWith(2, 'sessions.list', {
+      agentId: 'research',
+      limit: 1,
+    });
+    expect(useChatStore.getState().thinkingDefaults).toEqual(expect.objectContaining({
+      agentId: 'research',
+      modelProvider: 'custom-research',
+      model: 'reasoner',
+      thinkingDefault: 'high',
+    }));
+  });
+
   it('hydrates workspace identity and title activity from session summaries', async () => {
     gatewayRpcMock.mockResolvedValue({
       ts: 1,

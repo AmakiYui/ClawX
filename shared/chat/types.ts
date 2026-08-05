@@ -86,6 +86,15 @@ export interface ThinkingLevelOption {
   label: string;
 }
 
+/** Agent-scoped defaults advertised by Gateway sessions.list. */
+export interface ChatThinkingDefaults {
+  agentId: string;
+  modelProvider?: string;
+  model?: string;
+  thinkingLevels?: ThinkingLevelOption[];
+  thinkingDefault?: string;
+}
+
 /** Session from sessions.list */
 export interface ChatSession {
   key: string;
@@ -101,6 +110,7 @@ export interface ChatSession {
   thinkingLevels?: ThinkingLevelOption[];
   /** Effective inherited value when no explicit session override is present. */
   thinkingDefault?: string;
+  modelProvider?: string;
   model?: string;
   updatedAt?: number;
   status?: string;
@@ -148,6 +158,8 @@ export interface ChatState {
   /** Last message timestamp (ms) per session key, used for sorting */
   sessionLastActivity: Record<string, number>;
 
+  /** Agent-scoped fallback metadata for a local draft not yet listed by Gateway. */
+  thinkingDefaults: ChatThinkingDefaults | null;
   /** Session currently persisting a reasoning-effort override. */
   thinkingLevelUpdatingSessionKey: string | null;
 

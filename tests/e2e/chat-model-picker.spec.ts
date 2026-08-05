@@ -13,6 +13,7 @@ test.describe('ClawX chat model picker', () => {
 
         let currentModelRef = refs.alphaModelRef;
         let currentThinkingLevel: string | null = null;
+        let thinkingSessionMaterialized = false;
         const thinkingLevels = [
           { id: 'off', label: 'Off' },
           { id: 'low', label: 'Low' },
@@ -68,13 +69,19 @@ test.describe('ClawX chat model picker', () => {
             return {
               success: true,
               result: {
-                sessions: [{
+                defaults: {
+                  modelProvider: currentModelRef.split('/')[0],
+                  model: currentModelRef.split('/').slice(1).join('/'),
+                  thinkingDefault: 'medium',
+                  thinkingLevels,
+                },
+                sessions: thinkingSessionMaterialized ? [{
                   key: 'agent:main:main',
                   displayName: 'main',
                   thinkingLevel: currentThinkingLevel,
                   thinkingDefault: 'medium',
                   thinkingLevels,
-                }],
+                }] : [],
               },
             };
           }
@@ -123,18 +130,25 @@ test.describe('ClawX chat model picker', () => {
             hostRequests.push({ path: `gateway:${method}`, method: 'RPC', body: params });
             if (method === 'sessions.list') {
               return makeResponse(request.id, {
-                sessions: [{
+                defaults: {
+                  modelProvider: currentModelRef.split('/')[0],
+                  model: currentModelRef.split('/').slice(1).join('/'),
+                  thinkingDefault: 'medium',
+                  thinkingLevels,
+                },
+                sessions: thinkingSessionMaterialized ? [{
                   key: 'agent:main:main',
                   displayName: 'main',
                   thinkingLevel: currentThinkingLevel,
                   thinkingDefault: 'medium',
                   thinkingLevels,
-                }],
+                }] : [],
               });
             }
             if (method === 'sessions.patch') {
               const patch = params as { thinkingLevel?: string | null };
               currentThinkingLevel = patch.thinkingLevel ?? null;
+              thinkingSessionMaterialized = true;
               return makeResponse(request.id, {
                 ok: true,
                 key: 'agent:main:main',

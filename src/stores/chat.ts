@@ -487,12 +487,20 @@ async function fetchChatSessionsList(): Promise<Record<string, unknown>> {
   });
 }
 
+async function fetchAgentThinkingDefaults(agentId: string): Promise<Record<string, unknown>> {
+  return useGatewayStore.getState().rpc<Record<string, unknown>>('sessions.list', {
+    agentId,
+    limit: 1,
+  });
+}
+
 export const useChatStore = create<ChatState>((set, get) => ({
   sessions: [],
   currentSessionKey: DEFAULT_SESSION_KEY,
   currentAgentId: 'main',
   sessionLabels: {},
   sessionLastActivity: {},
+  thinkingDefaults: null,
   thinkingLevelUpdatingSessionKey: null,
 
   loadSessions: async (options) => {
@@ -548,8 +556,42 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
         try {
           const localRevisionBeforeRequest = localSessionCatalogRevision;
-          const data = await fetchChatSessionsList();
+          const stateBeforeRequest = get();
+          const requestedAgentId = stateBeforeRequest.currentAgentId;
+          const selectedSessionBeforeRequest = stateBeforeRequest.sessions.find(
+            (session) => session.key === stateBeforeRequest.currentSessionKey,
+          );
+          const shouldFetchScopedDefaults = requestedAgentId !== 'main'
+            && selectedSessionBeforeRequest?.createdLocally === true;
+          const [data, scopedDefaultsData] = await Promise.all([
+            fetchChatSessionsList(),
+            shouldFetchScopedDefaults ? fetchAgentThinkingDefaults(requestedAgentId) : null,
+          ]);
+          const defaultsData = scopedDefaultsData ?? data;
           if (generation === sessionCatalogGeneration) {
+            const rawDefaults = defaultsData.defaults
+              && typeof defaultsData.defaults === 'object'
+              && !Array.isArray(defaultsData.defaults)
+              ? defaultsData.defaults as Record<string, unknown>
+              : null;
+            const normalizedDefaults = rawDefaults
+              ? normalizeGatewaySessionRow({ ...rawDefaults, key: '__gateway_defaults__' })
+              : null;
+            const thinkingDefaults = normalizedDefaults
+              ? {
+                  agentId: requestedAgentId,
+                  ...(normalizedDefaults.modelProvider
+                    ? { modelProvider: normalizedDefaults.modelProvider }
+                    : {}),
+                  ...(normalizedDefaults.model ? { model: normalizedDefaults.model } : {}),
+                  ...(normalizedDefaults.thinkingLevels
+                    ? { thinkingLevels: normalizedDefaults.thinkingLevels }
+                    : {}),
+                  ...(normalizedDefaults.thinkingDefault
+                    ? { thinkingDefault: normalizedDefaults.thinkingDefault }
+                    : {}),
+                }
+              : null;
             const rawSessions = Array.isArray(data.sessions) ? data.sessions : [];
             const normalizedSessions = rawSessions.map((session) => (
               normalizeGatewaySessionRow(session as Record<string, unknown>)
@@ -921,6 +963,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                   currentAgentId: getAgentIdFromSessionKey(nextSessionKey),
                   sessionLabels,
                   sessionLastActivity,
+                  thinkingDefaults,
                 };
               });
               applySessionBackendLabels(set, sessionsWithCurrent);

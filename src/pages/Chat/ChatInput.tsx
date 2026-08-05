@@ -246,6 +246,7 @@ export function ChatInput({
   const currentAgentId = useChatStore((s) => s.currentAgentId);
   const currentSessionKey = useChatStore((s) => s.currentSessionKey);
   const sessions = useChatStore((s) => s.sessions);
+  const thinkingDefaults = useChatStore((s) => s.thinkingDefaults);
   const thinkingLevelUpdatingSessionKey = useChatStore((s) => s.thinkingLevelUpdatingSessionKey);
   const updateSessionThinkingLevel = useChatStore((s) => s.updateSessionThinkingLevel);
   const currentAgent = useMemo(
@@ -286,16 +287,27 @@ export function ChatInput({
     () => sessions.find((session) => session.key === currentSessionKey),
     [currentSessionKey, sessions],
   );
-  const thinkingOptions = useMemo(
-    () => canConfigureThinking ? (currentSession?.thinkingLevels ?? []) : [],
-    [canConfigureThinking, currentSession?.thinkingLevels],
-  );
+  const canUseThinkingDefaults = currentSession?.createdLocally === true
+    && thinkingDefaults?.agentId === currentAgentId;
+  const thinkingOptions = useMemo(() => {
+    if (!canConfigureThinking) return [];
+    if (currentSession?.thinkingLevels?.length) return currentSession.thinkingLevels;
+    return canUseThinkingDefaults ? (thinkingDefaults?.thinkingLevels ?? []) : [];
+  }, [
+    canConfigureThinking,
+    canUseThinkingDefaults,
+    currentSession?.thinkingLevels,
+    thinkingDefaults?.thinkingLevels,
+  ]);
   const effortOptions = useMemo(
     () => thinkingOptions.filter((option) => option.id !== 'off' && option.id !== 'minimal'),
     [thinkingOptions],
   );
-  const supportsThinkingToggle = thinkingOptions.some((option) => option.id === 'off');
-  const effectiveThinkingLevel = currentSession?.thinkingLevel ?? currentSession?.thinkingDefault;
+  const supportsThinkingToggle = thinkingOptions.some((option) => option.id === 'off')
+    && effortOptions.length > 0;
+  const effectiveThinkingLevel = currentSession?.thinkingLevel
+    ?? currentSession?.thinkingDefault
+    ?? (canUseThinkingDefaults ? thinkingDefaults?.thinkingDefault : undefined);
   const thinkingEnabled = effectiveThinkingLevel !== 'off';
   const currentThinkingLabel = useMemo(() => {
     if (!canConfigureThinking || !effectiveThinkingLevel) {
@@ -605,16 +617,23 @@ export function ChatInput({
       void handleSelectThinkingLevel('off');
       return;
     }
+    const runtimeDefault = currentSession?.thinkingDefault
+      ?? (canUseThinkingDefaults ? thinkingDefaults?.thinkingDefault : undefined);
     void handleSelectThinkingLevel(
       lastEnabledThinkingLevelRef.current
-        ?? currentSession?.thinkingDefault
+        ?? (runtimeDefault && runtimeDefault !== 'off' ? runtimeDefault : null)
+        ?? effortOptions.find((option) => option.id === 'medium')?.id
+        ?? effortOptions[0]?.id
         ?? null,
     );
   }, [
+    canUseThinkingDefaults,
     currentSession?.thinkingDefault,
     currentSession?.thinkingLevel,
     effectiveThinkingLevel,
+    effortOptions,
     handleSelectThinkingLevel,
+    thinkingDefaults?.thinkingDefault,
   ]);
 
   const handleWorkspaceButtonClick = useCallback(() => {
