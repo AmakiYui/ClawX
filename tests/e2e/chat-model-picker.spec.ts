@@ -78,9 +78,6 @@ test.describe('ClawX chat model picker', () => {
               },
             };
           }
-          if (method === 'chat.history') {
-            return { success: true, result: { messages: [] } };
-          }
           return { success: true, result: {} };
         });
 
@@ -147,9 +144,6 @@ test.describe('ClawX chat model picker', () => {
                   thinkingLevels,
                 },
               });
-            }
-            if (method === 'chat.history') {
-              return makeResponse(request.id, { success: true, result: { messages: [] } });
             }
             return makeResponse(request.id, { success: true, result: {} });
           }

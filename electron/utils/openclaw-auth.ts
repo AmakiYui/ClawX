@@ -28,7 +28,11 @@ import {
   isOpenClawOAuthPluginProviderKey,
 } from './provider-keys';
 import { normalizePiAiModelCost, type PiAiModelCostRates } from '../shared/pi-ai-model-cost';
-import { withConfigLock } from './config-mutex';
+import {
+  mutateOpenClawConfig,
+  readOpenClawConfigSnapshot,
+  reloadOpenClawSecretsIfRunning,
+} from '../gateway/config-delivery';
 import {
   ensureMemorySearchFtsDefault,
   hasUserMemorySearchConfig,
@@ -434,12 +438,6 @@ async function readAuthProfiles(agentId = 'main'): Promise<AuthProfilesStore> {
 
   const jsonStore = await readAuthProfilesJson(agentId);
   if (jsonStore?.profiles && Object.keys(jsonStore.profiles).length > 0) {
-    try {
-      writeAuthProfilesToSqlite(jsonStore, agentId);
-      console.log(`[auth-sync] Backfilled SQLite auth store from JSON for agent "${agentId}"`);
-    } catch (error) {
-      console.warn(`Failed to backfill SQLite auth store for agent "${agentId}":`, error);
-    }
     return jsonStore;
   }
 
@@ -448,18 +446,26 @@ async function readAuthProfiles(agentId = 'main'): Promise<AuthProfilesStore> {
 
 async function writeAuthProfiles(store: AuthProfilesStore, agentId = 'main'): Promise<void> {
   writeAuthProfilesToSqlite(store, agentId);
-  await writeJsonFile(getAuthProfilesPath(agentId), store);
+  try {
+    await writeJsonFile(getAuthProfilesPath(agentId), store);
+  } catch (error) {
+    console.warn(`Failed to update compatibility auth-profiles.json for agent "${agentId}":`, error);
+  }
 }
 
 /** Migrate legacy JSON-only auth profiles into SQLite for all configured agents. */
 export async function migrateAllAgentAuthProfilesToSqlite(): Promise<void> {
   const agentIds = await discoverAgentIds();
+  let migrated = false;
   for (const agentId of agentIds) {
     try {
-      await migrateAuthProfilesJsonToSqliteIfNeeded(agentId);
+      migrated = await migrateAuthProfilesJsonToSqliteIfNeeded(agentId) || migrated;
     } catch (error) {
       console.warn(`Failed to migrate auth profiles to SQLite for agent "${agentId}":`, error);
     }
+  }
+  if (migrated) {
+    await reloadOpenClawSecretsIfRunning();
   }
 }
 
@@ -528,7 +534,6 @@ async function discoverAgentIds(): Promise<string[]> {
 
 // ── OpenClaw Config Helpers ──────────────────────────────────────
 
-const OPENCLAW_CONFIG_PATH = join(homedir(), '.openclaw', 'openclaw.json');
 const FEISHU_PLUGIN_ID_CANDIDATES = ['openclaw-lark', 'feishu-openclaw-plugin'] as const;
 const VALID_COMPACTION_MODES = new Set(['default', 'safeguard']);
 /** Matches OpenClaw's 200k+ context-window recommendation (see computeContextAwareReserveTokensFloor). */
@@ -695,8 +700,11 @@ async function getProvidersFromAuthProfileStores(
   return providers;
 }
 
-async function collectActiveProviderIdsFromConfig(config: Record<string, unknown>): Promise<Set<string>> {
-  const activeProviders = new Set<string>();
+function collectActiveProviderIdsFromConfig(
+  config: Record<string, unknown>,
+  authProfileProviders: Iterable<string> = [],
+): Set<string> {
+  const activeProviders = new Set(authProfileProviders);
   const providers = (config.models as Record<string, unknown> | undefined)?.providers;
   if (providers && typeof providers === 'object') {
     for (const key of Object.keys(providers as Record<string, unknown>)) {
@@ -728,11 +736,6 @@ async function collectActiveProviderIdsFromConfig(config: Record<string, unknown
     { includeRawKeys: true },
   );
 
-  const authProfileProviders = await getProvidersFromAuthProfileStores({ includeRawKeys: true });
-  for (const provider of authProfileProviders) {
-    activeProviders.add(provider);
-  }
-
   for (const deprecated of DEPRECATED_PROVIDER_IDS) {
     activeProviders.delete(deprecated);
   }
@@ -741,7 +744,7 @@ async function collectActiveProviderIdsFromConfig(config: Record<string, unknown
 }
 
 async function readOpenClawJson(): Promise<Record<string, unknown>> {
-  return (await readJsonFile<Record<string, unknown>>(OPENCLAW_CONFIG_PATH)) ?? {};
+  return (await readOpenClawConfigSnapshot()).config;
 }
 
 async function resolveInstalledFeishuPluginId(): Promise<string | null> {
@@ -940,21 +943,6 @@ function backfillCustomProviderModelCapabilities(config: Record<string, unknown>
   return [...backfilled];
 }
 
-async function writeOpenClawJson(config: Record<string, unknown>): Promise<void> {
-  normalizeAgentsDefaultsCompactionMode(config);
-
-  // Ensure SIGUSR1 graceful reload is authorized by OpenClaw config.
-  const commands = (
-    config.commands && typeof config.commands === 'object'
-      ? { ...(config.commands as Record<string, unknown>) }
-      : {}
-  ) as Record<string, unknown>;
-  commands.restart = true;
-  config.commands = commands;
-
-  await writeJsonFile(OPENCLAW_CONFIG_PATH, config);
-}
-
 // ── Exported Functions (all async) ───────────────────────────────
 
 /**
@@ -1001,6 +989,7 @@ export async function saveOAuthTokenToOpenClaw(
 
     await writeAuthProfiles(store, id);
   }
+  await reloadOpenClawSecretsIfRunning();
   console.log(`Saved OAuth token for provider "${provider}" to OpenClaw auth-profiles (agents: ${agentIds.join(', ')})`);
 }
 
@@ -1062,6 +1051,7 @@ export async function saveProviderKeyToOpenClaw(
 
     await writeAuthProfiles(store, id);
   }
+  await reloadOpenClawSecretsIfRunning();
   console.log(`Saved API key for provider "${provider}" to OpenClaw auth-profiles (agents: ${agentIds.join(', ')})`);
 }
 
@@ -1074,12 +1064,17 @@ export async function removeProviderKeyFromOpenClaw(
 ): Promise<void> {
   const agentIds = agentId ? [agentId] : await discoverAgentIds();
   if (agentIds.length === 0) agentIds.push('main');
+  let modified = false;
 
   for (const id of agentIds) {
     const store = await readAuthProfiles(id);
     if (removeProfileFromStore(store, `${provider}:default`, 'api_key')) {
       await writeAuthProfiles(store, id);
+      modified = true;
     }
+  }
+  if (modified) {
+    await reloadOpenClawSecretsIfRunning();
   }
   console.log(`Removed API key for provider "${provider}" from OpenClaw auth-profiles (agents: ${agentIds.join(', ')})`);
 }
@@ -1138,7 +1133,6 @@ function isRuntimeGeneratedProviderKey(providerKey: string): boolean {
 function pruneStaleRuntimeModelConfig(
   modelCfg: Record<string, unknown>,
   activeProviders: Set<string>,
-  context: string,
 ): boolean {
   let modified = false;
   const primary = typeof modelCfg.primary === 'string' ? modelCfg.primary.trim() : '';
@@ -1151,7 +1145,6 @@ function pruneStaleRuntimeModelConfig(
     ) {
       delete modelCfg.primary;
       modified = true;
-      console.log(`Removed stale runtime model ref "${primary}" from ${context}`);
     }
   }
 
@@ -1175,8 +1168,13 @@ function pruneStaleRuntimeModelConfig(
  * Drop agent model refs that point at deleted custom/ollama runtime providers.
  * Built-in providers are left intact because they may still resolve via auth/env.
  */
-export async function pruneStaleRuntimeAgentModelRefs(config: Record<string, unknown>): Promise<boolean> {
-  const activeProviders = await getActiveOpenClawProviders();
+export async function pruneStaleRuntimeAgentModelRefs(
+  config: Record<string, unknown>,
+  authProfileProviders?: Iterable<string>,
+): Promise<boolean> {
+  const activeProviders = authProfileProviders
+    ? collectActiveProviderIdsFromConfig(config, authProfileProviders)
+    : await getActiveOpenClawProviders();
   const agents = config.agents;
   if (!isPlainRecord(agents)) return false;
 
@@ -1184,7 +1182,7 @@ export async function pruneStaleRuntimeAgentModelRefs(config: Record<string, unk
 
   const agentDefaults = agents.defaults;
   if (isPlainRecord(agentDefaults) && isPlainRecord(agentDefaults.model)) {
-    if (pruneStaleRuntimeModelConfig(agentDefaults.model, activeProviders, 'agents.defaults.model')) {
+    if (pruneStaleRuntimeModelConfig(agentDefaults.model, activeProviders)) {
       deleteModelConfigIfEmpty(agentDefaults);
       modified = true;
     }
@@ -1193,8 +1191,7 @@ export async function pruneStaleRuntimeAgentModelRefs(config: Record<string, unk
   if (Array.isArray(agents.list)) {
     for (const entry of agents.list) {
       if (!isPlainRecord(entry) || !isPlainRecord(entry.model)) continue;
-      const agentId = typeof entry.id === 'string' ? entry.id : 'unknown';
-      if (pruneStaleRuntimeModelConfig(entry.model, activeProviders, `agent "${agentId}" model override`)) {
+      if (pruneStaleRuntimeModelConfig(entry.model, activeProviders)) {
         deleteModelConfigIfEmpty(entry);
         modified = true;
       }
@@ -1205,50 +1202,13 @@ export async function pruneStaleRuntimeAgentModelRefs(config: Record<string, unk
 }
 
 export async function removeProviderFromOpenClaw(provider: string): Promise<void> {
-  // 1. Remove from auth-profiles.json.
-  // We must also remove entries whose raw `provider` field maps to this UI
-  // provider key via AUTH_PROFILE_PROVIDER_KEY_MAP (e.g. "openai-codex" → "openai").
-  // If those entries survive, getProvidersFromAuthProfileStores() will re-add
-  // the provider and trigger a re-seed loop in listAccounts().
   const providerKeysToRemove = expandProviderKeysForDeletion(provider);
   const agentIds = await discoverAgentIds();
   if (agentIds.length === 0) agentIds.push('main');
-  for (const id of agentIds) {
-    const store = await readAuthProfiles(id);
-    let storeModified = false;
-    for (const key of providerKeysToRemove) {
-      if (removeProfilesForProvider(store, key)) {
-        storeModified = true;
-      }
-    }
-    if (storeModified) {
-      await writeAuthProfiles(store, id);
-    }
-  }
-
-  // 2. Remove from models.json (per-agent model registry used by pi-ai directly)
-  for (const id of agentIds) {
-    const modelsPath = join(homedir(), '.openclaw', 'agents', id, 'agent', 'models.json');
-    try {
-      if (await fileExists(modelsPath)) {
-        const raw = await readFile(modelsPath, 'utf-8');
-        const data = JSON.parse(raw) as Record<string, unknown>;
-        const providers = data.providers as Record<string, unknown> | undefined;
-        if (providers && providers[provider]) {
-          delete providers[provider];
-          await writeFile(modelsPath, JSON.stringify(data, null, 2), 'utf-8');
-          console.log(`Removed models.json entry for provider "${provider}" (agent "${id}")`);
-        }
-      }
-    } catch (err) {
-      console.warn(`Failed to remove provider ${provider} from models.json (agent "${id}"):`, err);
-    }
-  }
-
-  // 3. Remove from openclaw.json
-  try {
-    await withConfigLock(async () => {
-      const config = await readOpenClawJson();
+  let authProfilesModified = false;
+  // Commit the authoritative config first. If this fails, sidecar credentials
+  // and model registries remain untouched and the caller can safely retry.
+  await mutateOpenClawConfig(async (config) => {
       let modified = false;
 
       // Remove plugin registrations for OAuth providers (e.g. MiniMax).
@@ -1256,7 +1216,6 @@ export async function removeProviderFromOpenClaw(provider: string): Promise<void
         const { canonicalPluginId, stalePluginIds } = getOAuthPluginRegistration(provider);
         if (removePluginRegistrations(config, [canonicalPluginId, ...stalePluginIds])) {
           modified = true;
-          console.log(`Removed OpenClaw plugin registrations for provider "${provider}"`);
         }
       }
 
@@ -1266,7 +1225,6 @@ export async function removeProviderFromOpenClaw(provider: string): Promise<void
       if (providers[provider]) {
         delete providers[provider];
         modified = true;
-        console.log(`Removed OpenClaw provider config: ${provider}`);
       }
 
       const auth = (config.auth && typeof config.auth === 'object'
@@ -1287,7 +1245,6 @@ export async function removeProviderFromOpenClaw(provider: string): Promise<void
           }
           delete authProfiles[profileId];
           modified = true;
-          console.log(`Removed OpenClaw auth profile: ${profileId}`);
         }
       }
 
@@ -1304,7 +1261,6 @@ export async function removeProviderFromOpenClaw(provider: string): Promise<void
         if (removeProviderPrefixFromModelConfig(modelCfg, providerPrefix)) {
           deleteModelConfigIfEmpty(agentDefaults);
           modified = true;
-          console.log(`Removed deleted provider "${provider}" from agents.defaults.model`);
         }
       }
 
@@ -1312,21 +1268,69 @@ export async function removeProviderFromOpenClaw(provider: string): Promise<void
       if (Array.isArray(agentList)) {
         for (const entry of agentList) {
           if (!isPlainRecord(entry) || !isPlainRecord(entry.model)) continue;
-          const agentId = typeof entry.id === 'string' ? entry.id : 'unknown';
           if (removeProviderPrefixFromModelConfig(entry.model, providerPrefix)) {
             deleteModelConfigIfEmpty(entry);
             modified = true;
-            console.log(`Removed deleted provider "${provider}" from agent "${agentId}" model override`);
           }
         }
       }
 
       if (modified) {
-        await writeOpenClawJson(config);
+        normalizeAgentsDefaultsCompactionMode(config);
       }
-    });
-  } catch (err) {
-    console.warn(`Failed to remove provider ${provider} from openclaw.json:`, err);
+  });
+
+  // Remove the provider from each per-agent model registry used by pi-ai.
+  for (const id of agentIds) {
+    const modelsPath = join(homedir(), '.openclaw', 'agents', id, 'agent', 'models.json');
+    if (!(await fileExists(modelsPath))) continue;
+    const raw = await readFile(modelsPath, 'utf-8');
+    const data = JSON.parse(raw) as Record<string, unknown>;
+    const providers = data.providers as Record<string, unknown> | undefined;
+    if (providers && providers[provider]) {
+      delete providers[provider];
+      await writeFile(modelsPath, JSON.stringify(data, null, 2), 'utf-8');
+      console.log(`Removed models.json entry for provider "${provider}" (agent "${id}")`);
+    }
+  }
+
+  // Remove auth entries whose raw provider maps to this UI provider key
+  // (for example "openai-codex" -> "openai"). Keep this last so every
+  // successful auth batch can immediately refresh the running snapshot.
+  let authWriteError: unknown;
+  try {
+    for (const id of agentIds) {
+      const store = await readAuthProfiles(id);
+      let storeModified = false;
+      for (const key of providerKeysToRemove) {
+        if (removeProfilesForProvider(store, key)) {
+          storeModified = true;
+        }
+      }
+      if (storeModified) {
+        await writeAuthProfiles(store, id);
+        authProfilesModified = true;
+      }
+    }
+  } catch (error) {
+    authWriteError = error;
+  }
+  if (authProfilesModified) {
+    try {
+      await reloadOpenClawSecretsIfRunning();
+    } catch (reloadError) {
+      if (authWriteError) {
+        throw new AggregateError(
+          [authWriteError, reloadError],
+          `Failed to remove provider "${provider}" auth profiles and refresh OpenClaw secrets`,
+          { cause: reloadError },
+        );
+      }
+      throw reloadError;
+    }
+  }
+  if (authWriteError) {
+    throw authWriteError;
   }
 }
 
@@ -1455,8 +1459,8 @@ function migrateOpenAiCodexOAuthRuntimeToOpenAiInConfig(config: Record<string, u
 
 export async function pruneInvalidApiProviderEntries(): Promise<string[]> {
   const removed: string[] = [];
-  await withConfigLock(async () => {
-    const config = await readOpenClawJson();
+  await mutateOpenClawConfig((config) => {
+    removed.length = 0;
     const models = (config.models || {}) as Record<string, unknown>;
     const providers = (models.providers || {}) as Record<string, unknown>;
     let modified = false;
@@ -1488,7 +1492,7 @@ export async function pruneInvalidApiProviderEntries(): Promise<string[]> {
     if (modified) {
       models.providers = providers;
       config.models = models;
-      await writeOpenClawJson(config);
+      normalizeAgentsDefaultsCompactionMode(config);
     }
   });
   return removed;
@@ -1518,8 +1522,7 @@ export async function setOpenClawDefaultModel(
   modelOverride?: string,
   fallbackModels: string[] = []
 ): Promise<void> {
-  return withConfigLock(async () => {
-    const config = await readOpenClawJson();
+  await mutateOpenClawConfig((config) => {
     ensureMoonshotKimiWebSearchCnBaseUrl(config, provider);
 
     const model = normalizeModelRef(provider, modelOverride);
@@ -1599,7 +1602,7 @@ export async function setOpenClawDefaultModel(
     if (!gateway.mode) gateway.mode = 'local';
     config.gateway = gateway;
 
-    await writeOpenClawJson(config);
+    normalizeAgentsDefaultsCompactionMode(config);
     console.log(`Set OpenClaw default model to "${model}" for provider "${provider}"`);
   });
 }
@@ -1808,8 +1811,8 @@ function healAnthropicMessagesMaxTokensInConfig(config: Record<string, unknown>)
  */
 export async function ensureAnthropicMessagesModelMaxTokens(): Promise<string[]> {
   const healed: string[] = [];
-  await withConfigLock(async () => {
-    const config = await readOpenClawJson();
+  await mutateOpenClawConfig((config) => {
+    healed.length = 0;
     const models = (config.models || {}) as Record<string, unknown>;
     const providers = (models.providers || {}) as Record<string, unknown>;
     let modified = false;
@@ -1828,7 +1831,7 @@ export async function ensureAnthropicMessagesModelMaxTokens(): Promise<string[]>
     if (modified) {
       models.providers = providers;
       config.models = models;
-      await writeOpenClawJson(config);
+      normalizeAgentsDefaultsCompactionMode(config);
     }
   });
   return healed;
@@ -2012,12 +2015,11 @@ function upsertOpenClawProviderEntry(
  */
 export async function ensureOpenClawProviderAgentRuntimePins(): Promise<string[]> {
   let pinned: string[] = [];
-  await withConfigLock(async () => {
-    const config = await readOpenClawJson();
+  await mutateOpenClawConfig((config) => {
     pinned = applyOpenClawProviderAgentRuntimePinsToConfig(config);
 
     if (pinned.length > 0) {
-      await writeOpenClawJson(config);
+      normalizeAgentsDefaultsCompactionMode(config);
     }
   });
   return pinned;
@@ -2108,8 +2110,7 @@ export async function syncProviderConfigToOpenClaw(
   modelId: string | undefined,
   override: RuntimeProviderConfigOverride
 ): Promise<void> {
-  return withConfigLock(async () => {
-    const config = await readOpenClawJson();
+  await mutateOpenClawConfig((config) => {
     ensureMoonshotKimiWebSearchCnBaseUrl(config, provider);
 
     if (override.baseUrl && override.api) {
@@ -2130,7 +2131,7 @@ export async function syncProviderConfigToOpenClaw(
       ensureOAuthPluginEnabled(config, provider);
     }
 
-    await writeOpenClawJson(config);
+    normalizeAgentsDefaultsCompactionMode(config);
   });
 }
 
@@ -2198,9 +2199,7 @@ export async function syncOpenAiCompatibleImageRelay(params: {
   apiKey?: string;
   imageModelIds?: string[];
 }): Promise<void> {
-  return withConfigLock(async () => {
-    const config = await readOpenClawJson();
-
+  await mutateOpenClawConfig((config) => {
     if (!params.enabled) {
       const models = (config.models || {}) as Record<string, unknown>;
       const providers = (models.providers || {}) as Record<string, unknown>;
@@ -2217,15 +2216,24 @@ export async function syncOpenAiCompatibleImageRelay(params: {
       const primary = typeof imageGenerationModel?.primary === 'string'
         ? imageGenerationModel.primary.trim().toLowerCase()
         : '';
-      if (defaults && primary.startsWith(`${CLAWX_OPENAI_IMAGE_PROVIDER_KEY}/`)) {
-        delete defaults.imageGenerationModel;
+      if (defaults && imageGenerationModel && primary.startsWith(`${CLAWX_OPENAI_IMAGE_PROVIDER_KEY}/`)) {
+        const remainingFallbacks = Array.isArray(imageGenerationModel.fallbacks)
+          ? imageGenerationModel.fallbacks.filter((fallback): fallback is string => (
+            typeof fallback === 'string'
+              && !fallback.trim().toLowerCase().startsWith(`${CLAWX_OPENAI_IMAGE_PROVIDER_KEY}/`)
+          ))
+          : [];
+        if (remainingFallbacks.length > 0) {
+          imageGenerationModel.primary = remainingFallbacks.shift();
+        } else {
+          delete imageGenerationModel.primary;
+        }
+        if (Array.isArray(imageGenerationModel.fallbacks)) {
+          imageGenerationModel.fallbacks = remainingFallbacks;
+        }
       }
       removePluginRegistrations(config, [CLAWX_OPENAI_IMAGE_PROVIDER_KEY]);
-      await writeOpenClawJson(config);
-      await removeProviderKeyFromOpenClaw(CLAWX_OPENAI_IMAGE_PROVIDER_KEY);
-      if (params.apiKey?.trim()) {
-        await saveProviderKeyToOpenClaw(CLAWX_OPENAI_IMAGE_PROVIDER_KEY, params.apiKey.trim());
-      }
+      normalizeAgentsDefaultsCompactionMode(config);
       return;
     }
 
@@ -2236,6 +2244,12 @@ export async function syncOpenAiCompatibleImageRelay(params: {
     if (modelIds.length === 0) {
       modelIds.push(CLAWX_OPENAI_IMAGE_DEFAULT_MODEL);
     }
+    const existingModels = readModelsProvider(config, CLAWX_OPENAI_IMAGE_PROVIDER_KEY)?.models;
+    const existingModelsById = new Map(
+      (Array.isArray(existingModels) ? existingModels : [])
+        .filter((model): model is Record<string, unknown> => isPlainRecord(model) && typeof model.id === 'string')
+        .map((model) => [model.id as string, model]),
+    );
     upsertOpenClawProviderEntry(config, CLAWX_OPENAI_IMAGE_PROVIDER_KEY, {
       baseUrl,
       api: 'openai-completions',
@@ -2243,13 +2257,24 @@ export async function syncOpenAiCompatibleImageRelay(params: {
       mergeExistingModels: false,
       request: { allowPrivateNetwork: true },
     });
-    ensurePluginRegistrationEnabled(config, CLAWX_OPENAI_IMAGE_PROVIDER_KEY);
-    await writeOpenClawJson(config);
-
-    if (params.apiKey?.trim()) {
-      await saveProviderKeyToOpenClaw(CLAWX_OPENAI_IMAGE_PROVIDER_KEY, params.apiKey.trim());
+    const relayProvider = readModelsProvider(config, CLAWX_OPENAI_IMAGE_PROVIDER_KEY);
+    if (relayProvider && Array.isArray(relayProvider.models)) {
+      relayProvider.models = relayProvider.models.map((model) => {
+        if (!isPlainRecord(model) || typeof model.id !== 'string') return model;
+        const existing = existingModelsById.get(model.id);
+        return existing ? { ...model, ...existing, id: model.id } : model;
+      });
     }
+    ensurePluginRegistrationEnabled(config, CLAWX_OPENAI_IMAGE_PROVIDER_KEY);
+    normalizeAgentsDefaultsCompactionMode(config);
   });
+
+  if (!params.enabled) {
+    await removeProviderKeyFromOpenClaw(CLAWX_OPENAI_IMAGE_PROVIDER_KEY);
+  }
+  if (params.apiKey?.trim()) {
+    await saveProviderKeyToOpenClaw(CLAWX_OPENAI_IMAGE_PROVIDER_KEY, params.apiKey.trim());
+  }
 }
 
 export function readOpenAiCompatibleImageRelayState(
@@ -2280,8 +2305,7 @@ export async function setOpenClawDefaultModelWithOverride(
   override: RuntimeProviderConfigOverride,
   fallbackModels: string[] = []
 ): Promise<void> {
-  return withConfigLock(async () => {
-    const config = await readOpenClawJson();
+  await mutateOpenClawConfig((config) => {
     ensureMoonshotKimiWebSearchCnBaseUrl(config, provider);
 
     const model = normalizeModelRef(provider, modelOverride);
@@ -2325,7 +2349,7 @@ export async function setOpenClawDefaultModelWithOverride(
       ensureOAuthPluginEnabled(config, provider);
     }
 
-    await writeOpenClawJson(config);
+    normalizeAgentsDefaultsCompactionMode(config);
     console.log(
       `Set OpenClaw default model to "${model}" for provider "${provider}" (runtime override)`
     );
@@ -2340,67 +2364,24 @@ export async function setOpenClawDefaultModelWithOverride(
 // These may still linger in openclaw.json from older versions.
 const DEPRECATED_PROVIDER_IDS = new Set(['qwen-portal']);
 
+export async function getActiveAuthProfileProviders(): Promise<Set<string>> {
+  return await getProvidersFromAuthProfileStores({ includeRawKeys: true });
+}
+
 export async function getActiveOpenClawProviders(): Promise<Set<string>> {
-  const activeProviders = new Set<string>();
-
   try {
-    const config = await readOpenClawJson();
-
-    // 1. models.providers
-    const providers = (config.models as Record<string, unknown> | undefined)?.providers;
-    if (providers && typeof providers === 'object') {
-      for (const key of Object.keys(providers as Record<string, unknown>)) {
-        activeProviders.add(key);
-      }
-    }
-
-    // 2. plugins.entries for OAuth providers
-    const plugins = (config.plugins as Record<string, unknown> | undefined)?.entries;
-    if (plugins && typeof plugins === 'object') {
-      for (const [pluginId, meta] of Object.entries(plugins as Record<string, unknown>)) {
-        if (pluginId.endsWith('-auth') && (meta as Record<string, unknown>).enabled) {
-          activeProviders.add(pluginId.replace(/-auth$/, ''));
-        }
-      }
-    }
-
-    // 3. agents.defaults.model.primary — the default model reference encodes
-    //    the provider prefix (e.g. "modelstudio/qwen3.6-plus" → "modelstudio").
-    //    This covers providers that are active via OAuth or env-key but don't
-    //    have an explicit models.providers entry.
-    const agents = config.agents as Record<string, unknown> | undefined;
-    const defaults = agents?.defaults as Record<string, unknown> | undefined;
-    const modelConfig = defaults?.model as Record<string, unknown> | undefined;
-    const primaryModel = typeof modelConfig?.primary === 'string' ? modelConfig.primary : undefined;
-    if (primaryModel?.includes('/')) {
-      activeProviders.add(primaryModel.split('/')[0]);
-    }
-
-    // 4. auth.profiles — OAuth/device-token based providers may exist only in
-    //    auth-profiles without explicit models.providers entries yet.
-    //    Raw keys (e.g. "openai-codex") are included so downstream logic can
-    //    distinguish OAuth runtime providers from their UI alias ("openai").
-    const auth = config.auth as Record<string, unknown> | undefined;
-    addProvidersFromProfileEntries(
-      auth?.profiles as Record<string, unknown> | undefined,
-      activeProviders,
-      { includeRawKeys: true },
+    const [config, authProfileProviders] = await Promise.all([
+      readOpenClawJson(),
+      getActiveAuthProfileProviders(),
+    ]);
+    return collectActiveProviderIdsFromConfig(
+      config,
+      authProfileProviders,
     );
-
-    const authProfileProviders = await getProvidersFromAuthProfileStores({ includeRawKeys: true });
-    for (const provider of authProfileProviders) {
-      activeProviders.add(provider);
-    }
   } catch (err) {
     console.warn('Failed to read openclaw.json for active providers:', err);
+    return new Set();
   }
-
-  // Remove deprecated providers that may still linger in config/auth files.
-  for (const deprecated of DEPRECATED_PROVIDER_IDS) {
-    activeProviders.delete(deprecated);
-  }
-
-  return activeProviders;
 }
 
 /**
@@ -2469,9 +2450,8 @@ function applyControlUiAllowedOrigins(controlUi: Record<string, unknown>, port: 
  * Write the ClawX gateway token into ~/.openclaw/openclaw.json.
  */
 export async function syncGatewayTokenToConfig(token: string): Promise<void> {
-  return withConfigLock(async () => {
-    const config = await readOpenClawJson();
-
+  const gatewayPort = (await getSetting('gatewayPort')) || PORTS.OPENCLAW_GATEWAY;
+  await mutateOpenClawConfig((config) => {
     const gateway = (
       config.gateway && typeof config.gateway === 'object'
         ? { ...(config.gateway as Record<string, unknown>) }
@@ -2493,16 +2473,15 @@ export async function syncGatewayTokenToConfig(token: string): Promise<void> {
         ? { ...(gateway.controlUi as Record<string, unknown>) }
         : {}
     ) as Record<string, unknown>;
-    const gatewayPort = (await getSetting('gatewayPort')) || PORTS.OPENCLAW_GATEWAY;
     applyControlUiAllowedOrigins(controlUi, gatewayPort);
     gateway.controlUi = controlUi;
 
     if (!gateway.mode) gateway.mode = 'local';
     config.gateway = gateway;
 
-    await writeOpenClawJson(config);
-    console.log('Synced gateway token to openclaw.json');
+    normalizeAgentsDefaultsCompactionMode(config);
   });
+  console.log('Synced gateway token to openclaw.json');
 }
 
 /**
@@ -2556,9 +2535,7 @@ function ensureWebFetchSsrfPolicyInConfig(config: Record<string, unknown>): bool
  * Ensure browser automation is enabled in ~/.openclaw/openclaw.json.
  */
 export async function syncBrowserConfigToOpenClaw(): Promise<void> {
-  return withConfigLock(async () => {
-    const config = await readOpenClawJson();
-
+  await mutateOpenClawConfig((config) => {
     const browser = (
       config.browser && typeof config.browser === 'object'
         ? { ...(config.browser as Record<string, unknown>) }
@@ -2594,7 +2571,7 @@ export async function syncBrowserConfigToOpenClaw(): Promise<void> {
     if (!changed) return;
 
     config.browser = browser;
-    await writeOpenClawJson(config);
+    normalizeAgentsDefaultsCompactionMode(config);
     console.log('Synced browser and web_fetch config to openclaw.json');
   });
 }
@@ -2612,9 +2589,7 @@ export async function syncBrowserConfigToOpenClaw(): Promise<void> {
 export async function syncSessionIdleMinutesToOpenClaw(): Promise<void> {
   const DEFAULT_IDLE_MINUTES = 10_080; // 7 days
 
-  return withConfigLock(async () => {
-    const config = await readOpenClawJson();
-
+  await mutateOpenClawConfig((config) => {
     const session = (
       config.session && typeof config.session === 'object'
         ? { ...(config.session as Record<string, unknown>) }
@@ -2633,22 +2608,36 @@ export async function syncSessionIdleMinutesToOpenClaw(): Promise<void> {
     session.idleMinutes = DEFAULT_IDLE_MINUTES;
     config.session = session;
 
-    await writeOpenClawJson(config);
+    normalizeAgentsDefaultsCompactionMode(config);
     console.log(`Synced session.idleMinutes=${DEFAULT_IDLE_MINUTES} (7d) to openclaw.json`);
   });
 }
 
 /**
  * Batch-apply gateway token, browser config, and session idle minutes in a
- * single config lock + read + write cycle.  Replaces three separate
- * withConfigLock calls during pre-launch sync.
+ * single coordinator transaction. Replaces three separate config mutations
+ * during pre-launch sync.
  */
 export async function batchSyncConfigFields(token: string): Promise<void> {
   const DEFAULT_IDLE_MINUTES = 10_080; // 7 days
+  const gatewayPort = (await getSetting('gatewayPort')) || PORTS.OPENCLAW_GATEWAY;
+  const memorySearchMigrationVersion = Number(
+    await getSetting('memorySearchFtsMigrationVersion'),
+  ) || 0;
+  const shouldMigrateLegacyMemorySearch =
+    memorySearchMigrationVersion < MEMORY_SEARCH_FTS_MIGRATION_VERSION;
+  const hasOpenAiEmbeddingKey = Boolean(await getProviderApiKeyFromOpenClaw('openai'));
+  let pinnedProviderRuntimes: string[] = [];
+  let compactionLog: string | undefined;
+  let memorySearchDefaultResult: 'migrated' | 'seeded' | 'unchanged' = 'unchanged';
+  let backfilledModelCapabilities: string[] = [];
 
-  return withConfigLock(async () => {
-    const config = await readOpenClawJson();
+  const changed = await mutateOpenClawConfig((config) => {
     let modified = true;
+    pinnedProviderRuntimes = [];
+    compactionLog = undefined;
+    memorySearchDefaultResult = 'unchanged';
+    backfilledModelCapabilities = [];
 
     // ── Gateway token + controlUi ──
     const gateway = (
@@ -2671,7 +2660,6 @@ export async function batchSyncConfigFields(token: string): Promise<void> {
         ? { ...(gateway.controlUi as Record<string, unknown>) }
         : {}
     ) as Record<string, unknown>;
-    const gatewayPort = (await getSetting('gatewayPort')) || PORTS.OPENCLAW_GATEWAY;
     applyControlUiAllowedOrigins(controlUi, gatewayPort);
     gateway.controlUi = controlUi;
     if (!gateway.mode) gateway.mode = 'local';
@@ -2712,10 +2700,9 @@ export async function batchSyncConfigFields(token: string): Promise<void> {
       modified = true;
     }
 
-    const pinnedProviderRuntimes = applyOpenClawProviderAgentRuntimePinsToConfig(config);
+    pinnedProviderRuntimes = applyOpenClawProviderAgentRuntimePinsToConfig(config);
     if (pinnedProviderRuntimes.length > 0) {
       modified = true;
-      console.log(`[batch-sync] Pinned embedded agent runtime for models.providers entries: ${pinnedProviderRuntimes.join(', ')}`);
     }
 
     // ── Session idle minutes ──
@@ -2737,58 +2724,65 @@ export async function batchSyncConfigFields(token: string): Promise<void> {
     // ── Compaction safeguard default ──
     if (ensureCompactionSafeguardDefault(config)) {
       modified = true;
-      console.log(`[batch-sync] Seeded agents.defaults.compaction.mode=safeguard reserveTokensFloor=${DEFAULT_COMPACTION_RESERVE_TOKENS_FLOOR}`);
+      compactionLog = `[batch-sync] Seeded agents.defaults.compaction.mode=safeguard reserveTokensFloor=${DEFAULT_COMPACTION_RESERVE_TOKENS_FLOOR}`;
     } else if (backfillCompactionReserveTokensFloor(config)) {
       modified = true;
-      console.log(`[batch-sync] Backfilled agents.defaults.compaction.reserveTokensFloor=${DEFAULT_COMPACTION_RESERVE_TOKENS_FLOOR}`);
+      compactionLog = `[batch-sync] Backfilled agents.defaults.compaction.reserveTokensFloor=${DEFAULT_COMPACTION_RESERVE_TOKENS_FLOOR}`;
     }
 
     // ── Memory search default ──
     // OpenClaw 2026.7.1 supports provider=none as an explicit FTS-only mode.
     // Migrate ClawX's exact legacy disabled default once, and otherwise seed
     // FTS only when the user has no memorySearch config or OpenAI embedding key.
-    const memorySearchMigrationVersion = Number(
-      await getSetting('memorySearchFtsMigrationVersion'),
-    ) || 0;
-    const shouldMigrateLegacyMemorySearch =
-      memorySearchMigrationVersion < MEMORY_SEARCH_FTS_MIGRATION_VERSION;
-    let memorySearchDefaultResult = shouldMigrateLegacyMemorySearch
+    memorySearchDefaultResult = shouldMigrateLegacyMemorySearch
       && hasUserMemorySearchConfig(config)
       ? ensureMemorySearchFtsDefault(config, true)
       : 'unchanged';
 
     if (memorySearchDefaultResult === 'unchanged'
       && !hasUserMemorySearchConfig(config)
-      && !(await getProviderApiKeyFromOpenClaw('openai'))) {
+      && !hasOpenAiEmbeddingKey) {
       memorySearchDefaultResult = ensureMemorySearchFtsDefault(config);
     }
 
     if (memorySearchDefaultResult !== 'unchanged') {
       modified = true;
-      console.log(
-        `[batch-sync] ${memorySearchDefaultResult === 'migrated' ? 'Migrated' : 'Seeded'} `
-        + 'agents.defaults.memorySearch to FTS-only mode',
-      );
     }
 
     // ── Custom provider model-capability backfill ──
-    const backfilledModelCapabilities = backfillCustomProviderModelCapabilities(config);
+    backfilledModelCapabilities = backfillCustomProviderModelCapabilities(config);
     if (backfilledModelCapabilities.length > 0) {
       modified = true;
-      console.log(`[batch-sync] Backfilled custom provider model capabilities: ${backfilledModelCapabilities.join(', ')}`);
     }
 
     if (modified) {
-      await writeOpenClawJson(config);
-      console.log('Synced gateway token, browser config, web_fetch SSRF policy, and session idle to openclaw.json');
-    }
-    if (shouldMigrateLegacyMemorySearch) {
-      await setSetting(
-        'memorySearchFtsMigrationVersion',
-        MEMORY_SEARCH_FTS_MIGRATION_VERSION,
-      );
+      normalizeAgentsDefaultsCompactionMode(config);
     }
   });
+  if (pinnedProviderRuntimes.length > 0) {
+    console.log(`[batch-sync] Pinned embedded agent runtime for models.providers entries: ${pinnedProviderRuntimes.join(', ')}`);
+  }
+  if (compactionLog) {
+    console.log(compactionLog);
+  }
+  if (memorySearchDefaultResult !== 'unchanged') {
+    console.log(
+      `[batch-sync] ${memorySearchDefaultResult === 'migrated' ? 'Migrated' : 'Seeded'} `
+      + 'agents.defaults.memorySearch to FTS-only mode',
+    );
+  }
+  if (backfilledModelCapabilities.length > 0) {
+    console.log(`[batch-sync] Backfilled custom provider model capabilities: ${backfilledModelCapabilities.join(', ')}`);
+  }
+  if (changed) {
+    console.log('Synced gateway token, browser config, web_fetch SSRF policy, and session idle to openclaw.json');
+  }
+  if (shouldMigrateLegacyMemorySearch) {
+    await setSetting(
+      'memorySearchFtsMigrationVersion',
+      MEMORY_SEARCH_FTS_MIGRATION_VERSION,
+    );
+  }
 }
 
 /**
@@ -2945,25 +2939,22 @@ function ensureToolDenyIncludes(
 }
 
 export async function sanitizeOpenClawConfig(): Promise<void> {
-  return withConfigLock(async () => {
-    // Skip sanitization if the config file does not exist yet.
-    // Creating a skeleton config here would overwrite any data written
-    // by the Gateway on its first run.
-    if (!(await fileExists(OPENCLAW_CONFIG_PATH))) {
-      console.log('[sanitize] openclaw.json does not exist yet, skipping sanitization');
-      return;
-    }
+  // The prelaunch file fallback must not turn a missing or corrupt config into
+  // a valid-looking skeleton. The coordinator performs the successful mutation.
+  let sourceExists: boolean;
+  try {
+    sourceExists = (await readOpenClawConfigSnapshot()).exists;
+  } catch {
+    console.log('[sanitize] openclaw.json could not be parsed, skipping sanitization to preserve data');
+    return;
+  }
+  if (!sourceExists) {
+    console.log('[sanitize] openclaw.json does not exist yet, skipping sanitization');
+    return;
+  }
+  const authProfileProviders = await getActiveAuthProfileProviders();
 
-    // Read the raw file directly instead of going through readOpenClawJson()
-    // which coalesces null → {}.  We need to distinguish a genuinely empty
-    // file (valid, proceed normally) from a corrupt/unreadable file (null,
-    // bail out to avoid overwriting the user's data with a skeleton config).
-    const rawConfig = await readJsonFile<Record<string, unknown>>(OPENCLAW_CONFIG_PATH);
-    if (rawConfig === null) {
-      console.log('[sanitize] openclaw.json could not be parsed, skipping sanitization to preserve data');
-      return;
-    }
-    const config: Record<string, unknown> = rawConfig;
+  await mutateOpenClawConfig(async (config) => {
     let modified = false;
 
     // ── skills section ──────────────────────────────────────────────
@@ -3052,20 +3043,6 @@ export async function sanitizeOpenClawConfig(): Promise<void> {
           }
         }
       }
-    }
-
-    // ── commands section ───────────────────────────────────────────
-    // Required for SIGUSR1 in-process reload authorization.
-    const commands = (
-      config.commands && typeof config.commands === 'object'
-        ? { ...(config.commands as Record<string, unknown>) }
-        : {}
-    ) as Record<string, unknown>;
-    if (commands.restart !== true) {
-      commands.restart = true;
-      config.commands = commands;
-      modified = true;
-      console.log('[sanitize] Enabling commands.restart for graceful reload support');
     }
 
     // ── tools.web.search.kimi ─────────────────────────────────────
@@ -3544,7 +3521,7 @@ export async function sanitizeOpenClawConfig(): Promise<void> {
       const bundled = discoverBundledPlugins();
       const installedExtensionIds = await discoverInstalledExtensionPluginIds();
       const loadedPluginIds = await discoverLoadedPluginIdsFromConfig(config);
-      const activeProviderIds = await collectActiveProviderIdsFromConfig(config);
+      const activeProviderIds = collectActiveProviderIdsFromConfig(config, authProfileProviders);
 
       const explicitlyEnabledBundledPluginIds = Object.keys(pEntries)
         .filter((pluginId) => {
@@ -3753,7 +3730,7 @@ export async function sanitizeOpenClawConfig(): Promise<void> {
     }
 
     if (modified) {
-      await writeOpenClawJson(config);
+      normalizeAgentsDefaultsCompactionMode(config);
       console.log('[sanitize] openclaw.json sanitized successfully');
     }
   });

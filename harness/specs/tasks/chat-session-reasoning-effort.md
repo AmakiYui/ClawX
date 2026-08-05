@@ -10,11 +10,16 @@ touchedAreas:
   - harness/specs/rules/acp-chat-state-and-history.md
   - harness/specs/rules/provider-model-metadata-preservation.md
   - electron/shared/providers/model-capabilities.ts
+  - electron/shared/providers/types.ts
+  - electron/services/providers/provider-runtime-sync.ts
   - electron/utils/openclaw-auth.ts
   - shared/chat/types.ts
+  - shared/host-api/contract.ts
+  - src/components/settings/ProvidersSettings.tsx
+  - src/lib/providers.ts
   - src/stores/chat.ts
-  - src/stores/chat/session-actions.ts
   - src/stores/chat/session-catalog.ts
+  - src/stores/providers.ts
   - src/pages/Chat/ChatInput.tsx
   - shared/i18n/locales/**/chat.json
   - tests/unit/session-catalog.test.ts
@@ -22,7 +27,10 @@ touchedAreas:
   - tests/unit/openclaw-auth.test.ts
   - tests/unit/chat-input.test.tsx
   - tests/unit/chat-store-session-label-fetch.test.ts
+  - tests/unit/provider-runtime-sync.test.ts
+  - tests/unit/provider-service-stale-cleanup.test.ts
   - tests/e2e/chat-model-picker.spec.ts
+  - tests/e2e/provider-lifecycle.spec.ts
   - README.md
   - README.zh-CN.md
   - README.ja-JP.md
@@ -51,7 +59,10 @@ requiredTests:
   - tests/unit/openclaw-auth.test.ts
   - tests/unit/chat-input.test.tsx
   - tests/unit/chat-store-session-label-fetch.test.ts
+  - tests/unit/provider-runtime-sync.test.ts
+  - tests/unit/provider-service-stale-cleanup.test.ts
   - tests/e2e/chat-model-picker.spec.ts
+  - tests/e2e/provider-lifecycle.spec.ts
 acceptance:
   - Renderer uses the typed host-api Gateway RPC boundary and never opens its own Gateway transport.
   - thinkingLevels, thinkingDefault, and thinkingLevel remain Gateway-owned session metadata.
