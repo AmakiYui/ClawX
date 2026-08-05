@@ -1,12 +1,12 @@
 # ACP Chat Architecture And Timeline
 
-Status: current architecture reference, reviewed 2026-07-15.
+Status: current architecture reference, reviewed 2026-08-05.
 
 Related scenario: `acp-chat-experience`
 
 Related rules: `acp-chat-state-and-history`, `attachment-access-safety`, `renderer-main-boundary`
 
-Related tasks: `acp-native-chat`, `acp-media-attachments`, `filter-openclaw-heartbeat-session`
+Related tasks: `acp-native-chat`, `acp-media-attachments`, `filter-openclaw-heartbeat-session`, `render-cron-run-live-status`
 
 ## Ownership
 
@@ -20,6 +20,8 @@ session/update -> Main routing envelope -> Renderer reducer -> timeline -> React
 ```
 
 Gateway remains responsible for non-Chat capabilities. Restricted Gateway host-event evidence may supplement asynchronous image-generation completion, but it is not a source for ordinary Chat messages or tool history.
+
+The only live assistant/process exception is the bounded cron overlay documented in `harness/reference/acp-cron-live-overlay.md`. Main accepts strict run-scoped cron identities only and keeps Gateway progress in a memory-only view model rendered beside, never inside, the ACP timeline. This exception is prohibited for ordinary non-cron messages, channel sessions, heartbeats, historical replay, and arbitrary Gateway content.
 
 ## Identity And Race Protection
 
@@ -36,6 +38,8 @@ ACP `session/load` replay is the primary source of Chat history. ClawX does not 
 OpenClaw emits replay through ordinary `session/update` notifications and completes the replay before `session/load` returns. Main collects those raw notifications for the active load generation and returns them with the load result instead of forwarding them incrementally. Renderer temporarily groups generation-matching host events that arrive during the IPC result handoff, then runs the normal reducer over the combined batch and publishes the resulting timeline in one state update. This is an in-flight transaction buffer only, not a history cache; after load, live updates continue through the normal host-event route. Permission requests are accepted only after the current loaded session starts a prompt, preventing load-time or handoff requests from creating invisible waiters.
 
 There are exactly two approved transcript-derived content supplements. ClawX may recover asynchronous image-generation completions with proven `image_generate` context, and it may recover explicit line-leading assistant `MEDIA:` attachment directives omitted by OpenClaw ACP. Both are bounded, marked, memory-only projections. Separately, Main may extract metadata-only whole-turn timing because ACP replay omits original timestamps. Renderer can attach that timing only to an unambiguously matched ACP turn; it cannot reconstruct ordinary assistant text, thoughts, tool cards, plans, permissions, file activity, or missing turns. See `harness/reference/acp-generated-media-and-diagnostics.md#bounded-transcript-exceptions` for the content compatibility grammar and timing boundary.
+
+The cron live overlay is not a transcript-derived supplement or a third history source. Its exact Main bounds are 32 active runs, 128 items per run, 500000 assistant characters, 100000 characters per item detail, 256 sequence-less fingerprints per run, and 128 terminal tombstones. Renderer subscribes to typed changes before fetching the snapshot and rejects older revisions, so late hydration cannot overwrite newer state. Raw thinking text is never retained or shown; only a localized activity indicator is allowed.
 
 ## Timeline Model
 
@@ -91,6 +95,7 @@ Available attachment cards contain a primary semantic action with keyboard activ
 - The primary Chat view does not render the legacy Execution Graph.
 - A recoverable initial `reply was never sent` load failure may leave an empty new-chat page usable; prompt failures remain visible.
 - The working indicator follows the same sending state as the Stop action and supports reduced motion.
+- External cron activity never enters ACP sending/cancelling state or exposes ACP Stop, cancellation, or permission controls. When a terminal removal belongs to a run rendered in the currently selected base cron session, Renderer removes the overlay and calls normal `loadAcpSession` exactly once; hidden, evicted, gateway-reset, or already acknowledged removals cannot trigger a delayed reload. The resulting ACP replay, with typed cron-history fallback only when replay is empty, is the completed-content authority.
 - The question directory is derived only from active user message segments. Duplicate text remains separate, titles use the first non-empty Markdown part, and textless entries use a localized fallback. Fewer than two questions disables navigation. When open, the directory floats above the conversation without changing the chat column width. Selection scrolls smoothly to the current-snapshot anchor; a missing anchor is a safe no-op. The UI caps the directory at 300 recent entries and reports the hidden count when older entries are omitted.
 - Heartbeat-only desktop sessions are hidden only when the exact OpenClaw heartbeat sentinel is present and there is no real user content. A title such as `ClawX` or `main` is never sufficient. The guard applies to list, startup selection, refresh, and cached summary hydration without deleting OpenClaw history.
 
@@ -99,3 +104,5 @@ Available attachment cards contain a primary semantic action with keyboard activ
 Key tests live in `tests/unit/acp-*.test.*`, `tests/unit/acp-timeline-groups.test.ts`, `tests/unit/attachment-access.test.ts`, `tests/unit/chat-question-directory.test.tsx`, `tests/e2e/chat-acp-inline-timeline.spec.ts`, and `tests/e2e/chat-acp-attachments.spec.ts`.
 
 This reference consolidates the former ACP native Chat, Chat polish, turn grouping, and question-directory design documents. Later implementation decisions supersede the original no-optimistic-message rule, the assumption that ACP id always equals Gateway session key, and segment-level assistant copy controls.
+
+The cron broker and overlay may be removed only after a distributed OpenClaw package proves through integration tests that loaded ACP sessions receive autonomous cron assistant, thought, and tool updates; generated media arrives as standard ACP content blocks; replay is complete and deduplicated; and external-run lifecycle and cancellation semantics are explicitly exposed. Until all four conditions hold, Gateway progress remains a separate transient authority rather than synthetic ACP.

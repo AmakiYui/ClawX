@@ -253,6 +253,35 @@
         "generatedReady": "生成的图片已准备好。",
         "generatedReadyWithMissing": "生成的图片已准备好，但有部分图片无法加载。"
     },
+    "cronLiveRun": {
+        "title": "计划任务实时运行",
+        "transient": "此处仅显示临时的只读进度。运行结束后，最终内容将显示在聊天记录中。",
+        "running": "运行中",
+        "thinking": "思考中",
+        "item": {
+            "tool": "工具",
+            "command": "命令",
+            "patch": "补丁",
+            "approval": "审批"
+        },
+        "status": {
+            "running": "运行中",
+            "completed": "已完成",
+            "failed": "失败"
+        },
+        "detail": {
+            "input": "输入",
+            "output": "输出",
+            "error": "错误",
+            "exitCode": "退出代码：{{code}}"
+        },
+        "patch": {
+            "added": "新增：{{count}}",
+            "modified": "修改：{{count}}",
+            "deleted": "删除：{{count}}"
+        },
+        "approvalReadOnly": "此状态为只读。请在发起请求的客户端中响应。"
+    },
     "composer": {
         "attachFiles": "添加文件",
         "pickSkill": "选择技能",

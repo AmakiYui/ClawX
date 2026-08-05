@@ -1,9 +1,11 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { StrictMode } from 'react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Chat } from '@/pages/Chat';
 import type { AcpTimelineSnapshot } from '@/lib/acp/timeline-types';
+import type { CronLiveRunOverlayChange, CronLiveRunOverlaySnapshot } from '@shared/chat/cron-live-run';
 
-const { acpState, agentsState, artifactPanelState, artifactPanelProps, chatState, gatewayState, settingsState } = vi.hoisted(() => ({
+const { acpState, agentsState, artifactPanelState, artifactPanelProps, chatState, cronOverlayState, gatewayState, settingsState } = vi.hoisted(() => ({
   acpState: {
     timeline: {
       sessionId: 'agent:main:main',
@@ -97,6 +99,12 @@ const { acpState, agentsState, artifactPanelState, artifactPanelProps, chatState
     cleanupEmptySession: vi.fn(),
     lastUserMessageAt: null,
   },
+  cronOverlayState: {
+    revision: 0,
+    snapshots: [] as CronLiveRunOverlaySnapshot[],
+    pendingRemovals: [] as Array<Extract<CronLiveRunOverlayChange, { kind: 'remove' }>>,
+    acknowledgeRemoval: vi.fn(),
+  },
   gatewayState: {
     status: { state: 'running', gatewayReady: true, port: 18789 },
   },
@@ -107,6 +115,14 @@ const { acpState, agentsState, artifactPanelState, artifactPanelProps, chatState
 }));
 
 const ensureAcpChatSubscriptions = vi.hoisted(() => vi.fn());
+const ensureCronLiveRunOverlaySubscriptions = vi.hoisted(() => vi.fn());
+const stickToBottomState = vi.hoisted(() => ({ isAtBottom: true }));
+const useStickToBottomInstant = vi.hoisted(() => vi.fn(() => ({
+  contentRef: { current: null },
+  scrollRef: { current: null },
+  scrollToBottom: vi.fn(),
+  isAtBottom: stickToBottomState.isAtBottom,
+})));
 const resolveWorkspaceContext = vi.hoisted(() => vi.fn());
 const openDialog = vi.hoisted(() => vi.fn());
 
@@ -124,6 +140,15 @@ vi.mock('sonner', () => ({
 vi.mock('@/stores/acp-chat-session', () => ({
   ensureAcpChatSubscriptions,
   useAcpChatSessionStore: (selector: (state: typeof acpState) => unknown) => selector(acpState),
+}));
+
+vi.mock('@/stores/cron-live-run-overlay', () => ({
+  ensureCronLiveRunOverlaySubscriptions,
+  selectCronLiveRunsForSession: (
+    state: Pick<typeof cronOverlayState, 'snapshots'>,
+    sessionKey: string | null | undefined,
+  ) => state.snapshots.filter((snapshot) => snapshot.canonicalSessionKey === sessionKey),
+  useCronLiveRunOverlayStore: (selector: (state: typeof cronOverlayState) => unknown) => selector(cronOverlayState),
 }));
 
 vi.mock('@/stores/agents', () => ({
@@ -147,12 +172,7 @@ vi.mock('@/stores/gateway', () => ({
 }));
 
 vi.mock('@/hooks/use-stick-to-bottom-instant', () => ({
-  useStickToBottomInstant: () => ({
-    contentRef: { current: null },
-    scrollRef: { current: null },
-    scrollToBottom: vi.fn(),
-    isAtBottom: true,
-  }),
+  useStickToBottomInstant,
 }));
 
 vi.mock('@/hooks/use-min-loading', () => ({
@@ -208,7 +228,7 @@ vi.mock('@/pages/Chat/ChatInput', () => ({
       >
         send
       </button>
-      <button type="button" data-testid="mock-stop" onClick={onStop}>stop</button>
+      {sending && <button type="button" data-testid="mock-stop" onClick={onStop}>stop</button>}
       <button type="button" data-testid="mock-send-target" onClick={() => onSend('Ask research', undefined, 'research')}>send target</button>
     </div>
   ),
@@ -227,6 +247,23 @@ vi.mock('@/components/file-preview/PanelResizeDivider', () => ({
 
 vi.mock('@/pages/Chat/ExecutionGraphCard', () => ({
   ExecutionGraphCard: () => <div data-testid="chat-execution-graph" />,
+}));
+
+vi.mock('@/pages/Chat/AcpMessageSegment', () => ({
+  AcpRenderPart: ({ part }: { part: { text?: string } }) => part.text ? <>{part.text}</> : null,
+  AcpMessageSegment: ({ item }: { item: { parts: Array<{ kind: string; text?: string }> } }) => (
+    <>{item.parts.map((part, index) => <span key={`${part.kind}:${index}`}>{part.text}</span>)}</>
+  ),
+  AcpAssistantHoverBar: () => null,
+  clipboardTextForParts: (parts: Array<{ text?: string }>) => parts.map((part) => part.text ?? '').join('\n'),
+}));
+
+vi.mock('@/pages/Chat/CronLiveRunOverlay', () => ({
+  CronLiveRunOverlay: ({ snapshot }: { snapshot: CronLiveRunOverlaySnapshot }) => (
+    <section data-testid="cron-live-run-overlay" data-run-id={snapshot.runId}>
+      {snapshot.assistantText}
+    </section>
+  ),
 }));
 
 vi.mock('react-i18next', () => ({
@@ -253,9 +290,9 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
-function emptyTimeline(): AcpTimelineSnapshot {
+function emptyTimeline(sessionId = 'agent:main:main'): AcpTimelineSnapshot {
   return {
-    sessionId: 'agent:main:main',
+    sessionId,
     loadGeneration: 1,
     itemOrder: [],
     itemsById: {},
@@ -263,6 +300,55 @@ function emptyTimeline(): AcpTimelineSnapshot {
     openMessageSegments: {},
     segmentCounts: {},
   };
+}
+
+const CRON_BASE_KEY = 'agent:main:cron:daily-report';
+const OTHER_CRON_BASE_KEY = 'agent:main:cron:weekly-report';
+
+function liveRun(
+  runId: string,
+  revision: number,
+  overrides: Partial<CronLiveRunOverlaySnapshot> = {},
+): CronLiveRunOverlaySnapshot {
+  return {
+    canonicalSessionKey: CRON_BASE_KEY,
+    sourceSessionKey: `${CRON_BASE_KEY}:run:session-${runId}`,
+    runSessionId: `session-${runId}`,
+    runId,
+    revision,
+    status: 'running',
+    updatedAt: revision,
+    assistantText: `live-${runId}`,
+    thinking: false,
+    items: [],
+    ...overrides,
+  };
+}
+
+function removal(
+  runId: string,
+  revision: number,
+  overrides: Partial<Extract<CronLiveRunOverlayChange, { kind: 'remove' }>> = {},
+): Extract<CronLiveRunOverlayChange, { kind: 'remove' }> {
+  return {
+    kind: 'remove',
+    revision,
+    canonicalSessionKey: CRON_BASE_KEY,
+    sourceSessionKey: `${CRON_BASE_KEY}:run:session-${runId}`,
+    runId,
+    reason: 'ended',
+    terminalStatus: 'completed',
+    ...overrides,
+  };
+}
+
+function selectCronSession(sessionKey = CRON_BASE_KEY, timeline = emptyTimeline(sessionKey)) {
+  chatState.currentSessionKey = sessionKey;
+  chatState.sessions = [{ key: sessionKey, workspacePath: '/workspace' }];
+  acpState.activeSessionKey = sessionKey;
+  acpState.workspaceRoot = '/workspace';
+  acpState.cwd = '/workspace';
+  acpState.timeline = timeline;
 }
 
 function populatedTimeline(): AcpTimelineSnapshot {
@@ -299,17 +385,22 @@ function populatedTimeline(): AcpTimelineSnapshot {
   };
 }
 
-function deferredPromise() {
-  let resolve!: () => void;
-  const promise = new Promise<void>((res) => {
+function deferredPromise<T = void>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
     resolve = res;
+    reject = rej;
   });
-  return { promise, resolve };
+  return { promise, reject, resolve };
 }
 
 describe('ACP Chat page', () => {
   beforeEach(() => {
     ensureAcpChatSubscriptions.mockReset();
+    ensureCronLiveRunOverlaySubscriptions.mockReset();
+    stickToBottomState.isAtBottom = true;
+    useStickToBottomInstant.mockClear();
     acpState.loading = false;
     acpState.sending = false;
     acpState.cancelling = false;
@@ -379,6 +470,10 @@ describe('ACP Chat page', () => {
       }
     });
     chatState.acknowledgeAcpSessionCreated.mockReset();
+    cronOverlayState.revision = 0;
+    cronOverlayState.snapshots = [];
+    cronOverlayState.pendingRemovals = [];
+    cronOverlayState.acknowledgeRemoval.mockReset();
     settingsState.chatWorkspacePath = '/workspace';
     settingsState.setChatWorkspacePath.mockReset();
     gatewayState.status = { state: 'running', gatewayReady: true, port: 18789 };
@@ -411,7 +506,7 @@ describe('ACP Chat page', () => {
     acpState.workspaceRoot = '/workspace';
     acpState.cwd = '/workspace';
 
-    render(<Chat />);
+    const { rerender } = render(<Chat />);
 
     await waitFor(() => {
       expect(screen.getByTestId('mock-chat-input')).toHaveAttribute('data-disabled', 'false');
@@ -426,8 +521,413 @@ describe('ACP Chat page', () => {
       }],
     });
 
+    acpState.sending = true;
+    rerender(<Chat />);
     fireEvent.click(screen.getByTestId('mock-stop'));
     expect(acpState.cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows only exact-session live overlays instead of the empty state and includes them in scroll pinning', () => {
+    selectCronSession();
+    stickToBottomState.isAtBottom = false;
+    cronOverlayState.snapshots = [
+      liveRun('visible', 1),
+      liveRun('other-job', 2, {
+        canonicalSessionKey: OTHER_CRON_BASE_KEY,
+        sourceSessionKey: `${OTHER_CRON_BASE_KEY}:run:session-other-job`,
+      }),
+      liveRun('ordinary', 3, {
+        canonicalSessionKey: 'agent:main:main',
+        sourceSessionKey: 'agent:main:main',
+      }),
+    ];
+
+    render(<Chat />);
+
+    expect(ensureCronLiveRunOverlaySubscriptions).toHaveBeenCalled();
+    expect(screen.queryByTestId('acp-chat-empty-state')).not.toBeInTheDocument();
+    expect(screen.getByTestId('cron-live-run-overlay')).toHaveTextContent('live-visible');
+    expect(screen.queryByText('live-other-job')).not.toBeInTheDocument();
+    expect(screen.queryByText('live-ordinary')).not.toBeInTheDocument();
+    expect(useStickToBottomInstant).toHaveBeenLastCalledWith(CRON_BASE_KEY, true);
+    expect(screen.getByTestId('chat-scroll-to-latest')).toBeInTheDocument();
+  });
+
+  it('renders deterministic live overlays after, and outside, the authoritative ACP timeline', () => {
+    selectCronSession(CRON_BASE_KEY, { ...populatedTimeline(), sessionId: CRON_BASE_KEY });
+    cronOverlayState.snapshots = [liveRun('first', 1), liveRun('second', 2)];
+
+    render(<Chat />);
+
+    const timeline = screen.getByTestId('acp-chat-timeline');
+    const overlays = screen.getAllByTestId('cron-live-run-overlay');
+    expect(overlays.map((overlay) => overlay.getAttribute('data-run-id'))).toEqual(['first', 'second']);
+    expect(timeline.nextElementSibling).toBe(overlays[0]);
+    expect(overlays[0]?.nextElementSibling).toBe(overlays[1]);
+    expect(within(timeline).queryByText('live-first')).not.toBeInTheDocument();
+    expect(within(timeline).queryByTestId('cron-live-run-overlay')).not.toBeInTheDocument();
+  });
+
+  it('hides overlays on session switch and restores retained Main snapshots when returning', () => {
+    selectCronSession();
+    cronOverlayState.snapshots = [liveRun('retained', 1)];
+    const { rerender } = render(<Chat />);
+    expect(screen.getByText('live-retained')).toBeInTheDocument();
+
+    selectCronSession('agent:main:main');
+    rerender(<Chat />);
+    expect(screen.queryByText('live-retained')).not.toBeInTheDocument();
+
+    selectCronSession();
+    rerender(<Chat />);
+    expect(screen.getByText('live-retained')).toBeInTheDocument();
+  });
+
+  it('keeps external cron activity out of ACP sending, Stop, cancellation, and permission flows', () => {
+    selectCronSession();
+    cronOverlayState.snapshots = [liveRun('external', 1)];
+
+    render(<Chat />);
+
+    expect(screen.getByTestId('mock-chat-input')).toHaveAttribute('data-sending', 'false');
+    expect(screen.queryByTestId('mock-stop')).not.toBeInTheDocument();
+    expect(acpState.cancel).not.toHaveBeenCalled();
+    expect(acpState.respondPermission).not.toHaveBeenCalled();
+  });
+
+  it('acknowledges a visible terminal run and reloads authoritative ACP history exactly once', async () => {
+    selectCronSession();
+    cronOverlayState.snapshots = [liveRun('visible', 1)];
+    const { rerender } = render(<StrictMode><Chat /></StrictMode>);
+    await waitFor(() => expect(screen.getByText('live-visible')).toBeInTheDocument());
+    acpState.loadSession.mockClear();
+
+    cronOverlayState.snapshots = [];
+    cronOverlayState.pendingRemovals = [removal('visible', 2)];
+    rerender(<StrictMode><Chat /></StrictMode>);
+
+    await waitFor(() => {
+      expect(cronOverlayState.acknowledgeRemoval).toHaveBeenCalledWith(2);
+      expect(acpState.loadSession).toHaveBeenCalledTimes(1);
+    });
+    expect(acpState.loadSession).toHaveBeenCalledWith({
+      sessionKey: CRON_BASE_KEY,
+      workspaceRoot: '/workspace',
+      cwd: '/workspace',
+    });
+    rerender(<StrictMode><Chat /></StrictMode>);
+    expect(acpState.loadSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a visible terminal removal pending until ACP sending and cancellation settle', async () => {
+    selectCronSession();
+    cronOverlayState.snapshots = [liveRun('prompt-busy', 1)];
+    const { rerender } = render(<StrictMode><Chat /></StrictMode>);
+    await waitFor(() => expect(screen.getByText('live-prompt-busy')).toBeInTheDocument());
+    acpState.loadSession.mockClear();
+
+    acpState.sending = true;
+    cronOverlayState.snapshots = [];
+    cronOverlayState.pendingRemovals = [removal('prompt-busy', 2)];
+    rerender(<StrictMode><Chat /></StrictMode>);
+
+    expect(acpState.sending).toBe(true);
+    expect(acpState.cancelling).toBe(false);
+    expect(cronOverlayState.pendingRemovals).toEqual([expect.objectContaining({ revision: 2 })]);
+    expect(cronOverlayState.acknowledgeRemoval).not.toHaveBeenCalled();
+    expect(acpState.loadSession).not.toHaveBeenCalled();
+
+    acpState.sending = false;
+    acpState.cancelling = true;
+    rerender(<StrictMode><Chat /></StrictMode>);
+
+    expect(acpState.sending).toBe(false);
+    expect(acpState.cancelling).toBe(true);
+    expect(cronOverlayState.acknowledgeRemoval).not.toHaveBeenCalled();
+    expect(acpState.loadSession).not.toHaveBeenCalled();
+
+    acpState.cancelling = false;
+    rerender(<StrictMode><Chat /></StrictMode>);
+
+    await waitFor(() => {
+      expect(cronOverlayState.acknowledgeRemoval).toHaveBeenCalledTimes(1);
+      expect(cronOverlayState.acknowledgeRemoval).toHaveBeenCalledWith(2);
+      expect(acpState.loadSession).toHaveBeenCalledTimes(1);
+    });
+    expect(acpState.loadSession).toHaveBeenCalledWith({
+      sessionKey: CRON_BASE_KEY,
+      workspaceRoot: '/workspace',
+      cwd: '/workspace',
+    });
+    expect(acpState.sending).toBe(false);
+    expect(acpState.cancelling).toBe(false);
+  });
+
+  it('queues a visible terminal refresh behind an in-flight normal load for the same session', async () => {
+    const normalLoad = deferredPromise<boolean>();
+    const terminalLoad = deferredPromise<boolean>();
+    selectCronSession();
+    acpState.activeSessionKey = null;
+    cronOverlayState.snapshots = [liveRun('queued', 1)];
+    acpState.loadSession
+      .mockImplementationOnce(() => normalLoad.promise.then((loaded) => {
+        acpState.activeSessionKey = CRON_BASE_KEY;
+        acpState.workspaceRoot = '/workspace';
+        acpState.cwd = '/workspace';
+        return loaded;
+      }))
+      .mockReturnValueOnce(terminalLoad.promise);
+    const { rerender } = render(<StrictMode><Chat /></StrictMode>);
+    await waitFor(() => expect(acpState.loadSession).toHaveBeenCalledTimes(1));
+    expect(screen.getByText('live-queued')).toBeInTheDocument();
+
+    cronOverlayState.snapshots = [];
+    cronOverlayState.pendingRemovals = [removal('queued', 2)];
+    rerender(<StrictMode><Chat /></StrictMode>);
+
+    expect(cronOverlayState.acknowledgeRemoval).not.toHaveBeenCalled();
+    expect(acpState.loadSession).toHaveBeenCalledTimes(1);
+
+    normalLoad.resolve(true);
+    await waitFor(() => {
+      expect(cronOverlayState.acknowledgeRemoval).toHaveBeenCalledWith(2);
+      expect(acpState.loadSession).toHaveBeenCalledTimes(2);
+    });
+    expect(acpState.loadSession.mock.calls[1]?.[0]).toEqual({
+      sessionKey: CRON_BASE_KEY,
+      workspaceRoot: '/workspace',
+      cwd: '/workspace',
+    });
+  });
+
+  it('keeps a newer same-key load claimed when a stale load settles after switching away and back', async () => {
+    const loadA = deferredPromise<boolean>();
+    const loadB = deferredPromise<boolean>();
+    const terminalLoad = deferredPromise<boolean>();
+    selectCronSession();
+    acpState.activeSessionKey = null;
+    cronOverlayState.snapshots = [liveRun('aba-visible', 1)];
+    acpState.loadSession
+      .mockReturnValueOnce(loadA.promise)
+      .mockReturnValueOnce(loadB.promise)
+      .mockReturnValueOnce(terminalLoad.promise);
+    const { rerender } = render(<StrictMode><Chat /></StrictMode>);
+    await waitFor(() => expect(acpState.loadSession).toHaveBeenCalledTimes(1));
+
+    const localSessionKey = 'agent:main:local-away';
+    chatState.currentSessionKey = localSessionKey;
+    chatState.sessions = [
+      { key: CRON_BASE_KEY, workspacePath: '/workspace' },
+      { key: localSessionKey, workspacePath: '/workspace', createdLocally: true },
+    ];
+    acpState.activeSessionKey = localSessionKey;
+    acpState.workspaceRoot = '/workspace';
+    acpState.cwd = '/workspace';
+    acpState.timeline = emptyTimeline(localSessionKey);
+    rerender(<StrictMode><Chat /></StrictMode>);
+
+    selectCronSession();
+    acpState.activeSessionKey = null;
+    rerender(<StrictMode><Chat /></StrictMode>);
+    await waitFor(() => expect(acpState.loadSession).toHaveBeenCalledTimes(2));
+    expect(screen.getByText('live-aba-visible')).toBeInTheDocument();
+
+    cronOverlayState.snapshots = [];
+    cronOverlayState.pendingRemovals = [removal('aba-visible', 2)];
+    rerender(<StrictMode><Chat /></StrictMode>);
+    expect(acpState.loadSession).toHaveBeenCalledTimes(2);
+    expect(cronOverlayState.acknowledgeRemoval).not.toHaveBeenCalled();
+
+    await act(async () => {
+      loadA.resolve(true);
+      await Promise.resolve();
+    });
+
+    expect(acpState.loadSession).toHaveBeenCalledTimes(2);
+    expect(cronOverlayState.acknowledgeRemoval).not.toHaveBeenCalled();
+
+    loadB.resolve(true);
+    await waitFor(() => {
+      expect(acpState.loadSession).toHaveBeenCalledTimes(3);
+      expect(cronOverlayState.acknowledgeRemoval).toHaveBeenCalledWith(2);
+    });
+  });
+
+  it('leaves a visible terminal removal pending until its workspace becomes available', async () => {
+    selectCronSession();
+    cronOverlayState.snapshots = [liveRun('workspace-wait', 1)];
+    resolveWorkspaceContext
+      .mockResolvedValueOnce({ ok: false, error: 'notFound' })
+      .mockImplementation(async (input: { workspaceRoot: string; executionCwd: string }) => ({
+        ok: true,
+        workspaceRoot: input.workspaceRoot,
+        executionCwd: input.executionCwd,
+      }));
+    const { rerender } = render(<Chat />);
+    await screen.findByTestId('workspace-unavailable-banner');
+    acpState.loadSession.mockClear();
+
+    cronOverlayState.snapshots = [];
+    cronOverlayState.pendingRemovals = [removal('workspace-wait', 2)];
+    rerender(<Chat />);
+
+    expect(cronOverlayState.acknowledgeRemoval).not.toHaveBeenCalled();
+    expect(acpState.loadSession).not.toHaveBeenCalled();
+
+    chatState.sessions = [{ key: CRON_BASE_KEY, workspacePath: '/workspace-restored' }];
+    rerender(<Chat />);
+
+    await waitFor(() => {
+      expect(cronOverlayState.acknowledgeRemoval).toHaveBeenCalledWith(2);
+      expect(acpState.loadSession).toHaveBeenCalledTimes(1);
+    });
+    expect(acpState.loadSession).toHaveBeenCalledWith({
+      sessionKey: CRON_BASE_KEY,
+      workspaceRoot: '/workspace-restored',
+      cwd: '/workspace-restored',
+    });
+  });
+
+  it('serializes authoritative reloads for a burst of visible terminal runs', async () => {
+    const firstTerminalLoad = deferredPromise<boolean>();
+    const secondTerminalLoad = deferredPromise<boolean>();
+    selectCronSession();
+    cronOverlayState.snapshots = [liveRun('first-visible', 1), liveRun('second-visible', 2)];
+    const { rerender } = render(<StrictMode><Chat /></StrictMode>);
+    await waitFor(() => expect(screen.getAllByTestId('cron-live-run-overlay')).toHaveLength(2));
+    await waitFor(() => expect(screen.getByTestId('mock-chat-input')).toHaveAttribute('data-disabled', 'false'));
+    acpState.loadSession.mockReset();
+    acpState.loadSession
+      .mockReturnValueOnce(firstTerminalLoad.promise)
+      .mockReturnValueOnce(secondTerminalLoad.promise);
+
+    cronOverlayState.snapshots = [];
+    cronOverlayState.pendingRemovals = [
+      removal('first-visible', 3),
+      removal('second-visible', 4),
+    ];
+    rerender(<StrictMode><Chat /></StrictMode>);
+
+    await waitFor(() => expect(acpState.loadSession).toHaveBeenCalledTimes(1));
+    expect(cronOverlayState.acknowledgeRemoval.mock.calls).toEqual([[3]]);
+
+    firstTerminalLoad.resolve(true);
+    await waitFor(() => expect(acpState.loadSession).toHaveBeenCalledTimes(2));
+    expect(cronOverlayState.acknowledgeRemoval.mock.calls).toEqual([[3], [4]]);
+  });
+
+  it('clears coordination after a rejected terminal load without replaying its marker', async () => {
+    const terminalLoad = deferredPromise<boolean>();
+    selectCronSession();
+    cronOverlayState.snapshots = [liveRun('rejected', 1)];
+    const { rerender } = render(<StrictMode><Chat /></StrictMode>);
+    await waitFor(() => expect(screen.getByTestId('mock-chat-input')).toHaveAttribute('data-disabled', 'false'));
+    acpState.loadSession.mockReset();
+    acpState.loadSession
+      .mockReturnValueOnce(terminalLoad.promise)
+      .mockResolvedValueOnce(true);
+
+    cronOverlayState.snapshots = [];
+    cronOverlayState.pendingRemovals = [removal('rejected', 2)];
+    rerender(<StrictMode><Chat /></StrictMode>);
+
+    await waitFor(() => expect(acpState.loadSession).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(cronOverlayState.acknowledgeRemoval).toHaveBeenCalledTimes(1));
+
+    acpState.activeSessionKey = null;
+    rerender(<StrictMode><Chat /></StrictMode>);
+
+    expect(acpState.loadSession).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      terminalLoad.reject(new Error('terminal load failed'));
+      await Promise.resolve();
+    });
+    acpState.activeSessionKey = CRON_BASE_KEY;
+    rerender(<StrictMode><Chat /></StrictMode>);
+    acpState.activeSessionKey = null;
+    rerender(<StrictMode><Chat /></StrictMode>);
+
+    await waitFor(() => expect(acpState.loadSession).toHaveBeenCalledTimes(2));
+    expect(cronOverlayState.acknowledgeRemoval.mock.calls).toEqual([[2]]);
+  });
+
+  it('processes removal bursts in revision order and reloads only runs rendered in the current session', async () => {
+    selectCronSession();
+    cronOverlayState.snapshots = [
+      liveRun('visible', 1),
+      liveRun('inactive', 2, {
+        canonicalSessionKey: OTHER_CRON_BASE_KEY,
+        sourceSessionKey: `${OTHER_CRON_BASE_KEY}:run:session-inactive`,
+      }),
+    ];
+    const { rerender } = render(<Chat />);
+    await waitFor(() => expect(screen.getByText('live-visible')).toBeInTheDocument());
+    acpState.loadSession.mockClear();
+
+    cronOverlayState.snapshots = [];
+    cronOverlayState.pendingRemovals = [
+      removal('inactive', 4, {
+        canonicalSessionKey: OTHER_CRON_BASE_KEY,
+        sourceSessionKey: `${OTHER_CRON_BASE_KEY}:run:session-inactive`,
+      }),
+      removal('visible', 3),
+    ];
+    rerender(<Chat />);
+
+    await waitFor(() => expect(cronOverlayState.acknowledgeRemoval).toHaveBeenCalledTimes(2));
+    expect(cronOverlayState.acknowledgeRemoval.mock.calls).toEqual([[3], [4]]);
+    expect(acpState.loadSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not defer a terminal reload received while another session is selected', async () => {
+    selectCronSession();
+    cronOverlayState.snapshots = [liveRun('ended-away', 1)];
+    const { rerender } = render(<Chat />);
+    await waitFor(() => expect(screen.getByText('live-ended-away')).toBeInTheDocument());
+
+    selectCronSession('agent:main:main');
+    rerender(<Chat />);
+    acpState.loadSession.mockClear();
+    cronOverlayState.snapshots = [];
+    cronOverlayState.pendingRemovals = [removal('ended-away', 2)];
+    rerender(<Chat />);
+
+    await waitFor(() => expect(cronOverlayState.acknowledgeRemoval).toHaveBeenCalledWith(2));
+    expect(acpState.loadSession).not.toHaveBeenCalled();
+
+    selectCronSession();
+    rerender(<Chat />);
+    expect(acpState.loadSession).not.toHaveBeenCalled();
+  });
+
+  it('acknowledges an ended run that was never rendered without reloading ACP history', async () => {
+    selectCronSession();
+    cronOverlayState.pendingRemovals = [removal('never-rendered', 1)];
+
+    render(<StrictMode><Chat /></StrictMode>);
+
+    await waitFor(() => expect(cronOverlayState.acknowledgeRemoval).toHaveBeenCalledWith(1));
+    expect(acpState.loadSession).not.toHaveBeenCalled();
+  });
+
+  it('acknowledges evicted and gateway-reset overlays without authoritative reloads', async () => {
+    selectCronSession();
+    cronOverlayState.snapshots = [liveRun('evicted', 1), liveRun('reset', 2)];
+    const { rerender } = render(<Chat />);
+    await waitFor(() => expect(screen.getAllByTestId('cron-live-run-overlay')).toHaveLength(2));
+    acpState.loadSession.mockClear();
+
+    cronOverlayState.snapshots = [];
+    cronOverlayState.pendingRemovals = [
+      removal('evicted', 3, { reason: 'evicted', terminalStatus: undefined }),
+      removal('reset', 4, { reason: 'gateway-reset', terminalStatus: undefined }),
+    ];
+    rerender(<Chat />);
+
+    await waitFor(() => expect(cronOverlayState.acknowledgeRemoval).toHaveBeenCalledTimes(2));
+    expect(cronOverlayState.acknowledgeRemoval.mock.calls).toEqual([[3], [4]]);
+    expect(acpState.loadSession).not.toHaveBeenCalled();
   });
 
   it('loads from the effective workspace without waiting for agents', async () => {

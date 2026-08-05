@@ -44,7 +44,7 @@ import { buildCronHistoryAcpNotifications, fetchCronSessionHistory } from '@/lib
 import { hostApi } from '@/lib/host-api';
 import { hostEvents } from '@/lib/host-events';
 import type { AcpTimelineSnapshot, MessageSegmentItem, PermissionItem, RenderPart } from '@/lib/acp/timeline-types';
-import { isCronSessionKey } from './chat/cron-session-utils';
+import { isCronSessionKey } from '@shared/chat/cron-session';
 
 const EMPTY_SESSION_ID = '';
 const CANCEL_PERMISSION_OPTION_ID = '__cancelled__';

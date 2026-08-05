@@ -1128,6 +1128,30 @@ describe('host services', () => {
     expect(source).not.toMatch(/['"]webBrowser:/);
   });
 
+  it('passes one cron live-run broker through Main before Gateway auto-start', () => {
+    const mainSource = readFileSync(join(process.cwd(), 'electron/main/index.ts'), 'utf8');
+    const handlersSource = readFileSync(join(process.cwd(), 'electron/main/ipc-handlers.ts'), 'utf8');
+    const brokerSource = readFileSync(
+      join(process.cwd(), 'electron/services/cron-live-run-broker.ts'),
+      'utf8',
+    );
+    const rawRuntimeListener = mainSource.slice(
+      mainSource.indexOf("gatewayManager.on('chat:runtime-event'"),
+      mainSource.indexOf("gatewayManager.on('channel:status'"),
+    );
+
+    expect(mainSource.match(/new CronLiveRunBroker\(/g)).toHaveLength(1);
+    expect(mainSource).toContain('registerIpcHandlers(\n    gatewayManager,\n    cronLiveRunBroker,');
+    expect(handlersSource).toContain('createCronApi({ gatewayManager, cronLiveRunBroker })');
+    expect(mainSource.indexOf('bindCronLiveRunBroker({')).toBeLessThan(
+      mainSource.indexOf('await gatewayManager.start();'),
+    );
+    expect(brokerSource.match(/\.ingestRuntimeEvent\(/g)).toHaveLength(1);
+    expect(mainSource).not.toContain('.ingestRuntimeEvent(');
+    expect(rawRuntimeListener).toContain("sendMainWindowEvent('chat:runtime-event', data);");
+    expect(rawRuntimeListener).not.toContain('cronLiveRunBroker');
+  });
+
   it('configures browser policy and typed handlers before the initial renderer load', () => {
     const source = readFileSync(join(process.cwd(), 'electron/main/index.ts'), 'utf8');
     const createWindowSource = source.slice(

@@ -15,6 +15,11 @@ import { useChatStore } from '@/stores/chat';
 import { useSessionAttentionStore } from '@/stores/session-attention';
 import { useSettingsStore } from '@/stores/settings';
 import { ensureAcpChatSubscriptions, useAcpChatSessionStore } from '@/stores/acp-chat-session';
+import {
+  ensureCronLiveRunOverlaySubscriptions,
+  selectCronLiveRunsForSession,
+  useCronLiveRunOverlayStore,
+} from '@/stores/cron-live-run-overlay';
 import { LoadingSpinner } from '@/components/common/LoadingSpinner';
 import { cn } from '@/lib/utils';
 import {
@@ -33,6 +38,7 @@ import { ChatInput, type ChatWorkspaceOption, type FileAttachment } from './Chat
 import { ChatToolbar } from './ChatToolbar';
 import { AcpTimeline } from './AcpTimeline';
 import { AcpErrorBanner } from './AcpErrorBanner';
+import { CronLiveRunOverlay } from './CronLiveRunOverlay';
 
 const ArtifactPanelLazy = lazy(() =>
   import('@/components/file-preview/ArtifactPanel').then((m) => ({ default: m.ArtifactPanel })),
@@ -59,6 +65,11 @@ const QUESTION_DIRECTORY_RENDER_LIMIT = 300;
 type WorkspaceContextCheck = {
   key: string;
   available: boolean;
+};
+
+type AcpLoadClaim = {
+  key: string;
+  token: symbol;
 };
 
 function buildQuestionDirectoryTitle(item: MessageSegmentItem, fallback: string): string {
@@ -175,10 +186,18 @@ function WorkspaceUnavailableBanner({
 
 export function Chat() {
   ensureAcpChatSubscriptions();
+  ensureCronLiveRunOverlaySubscriptions();
 
   const { t } = useTranslation('chat');
 
   const currentSessionKey = useChatStore((s) => s.currentSessionKey);
+  const cronLiveRunSnapshots = useCronLiveRunOverlayStore((s) => s.snapshots);
+  const pendingCronLiveRunRemovals = useCronLiveRunOverlayStore((s) => s.pendingRemovals);
+  const acknowledgeCronLiveRunRemoval = useCronLiveRunOverlayStore((s) => s.acknowledgeRemoval);
+  const visibleCronLiveRuns = selectCronLiveRunsForSession(
+    { snapshots: cronLiveRunSnapshots },
+    currentSessionKey,
+  );
   const sessions = useChatStore((s) => s.sessions);
   const sessionLabels = useChatStore((s) => s.sessionLabels);
   const currentAgentId = useChatStore((s) => s.currentAgentId);
@@ -278,11 +297,28 @@ export function Chat() {
   const panelWidthPct = useArtifactPanel((s) => s.widthPct);
   const closeArtifactPanel = useArtifactPanel((s) => s.close);
   const splitContainerRef = useRef<HTMLDivElement | null>(null);
-  const acpLoadInFlightKeyRef = useRef<string | null>(null);
+  const acpLoadInFlightKeyRef = useRef<AcpLoadClaim | null>(null);
+  const [acpLoadCompletionEpoch, setAcpLoadCompletionEpoch] = useState(0);
+  const renderedCronRunIdsRef = useRef({
+    sessionKey: currentSessionKey,
+    runIds: new Set<string>(),
+  });
+  const processedCronRemovalRevisionsRef = useRef(new Set<number>());
   const { contentRef, scrollRef, scrollToBottom, isAtBottom } = useStickToBottomInstant(
     currentSessionKey,
-    acpSending || acpCancelling,
+    acpSending || acpCancelling || visibleCronLiveRuns.length > 0,
   );
+
+  useEffect(() => {
+    if (renderedCronRunIdsRef.current.sessionKey !== currentSessionKey) {
+      renderedCronRunIdsRef.current = {
+        sessionKey: currentSessionKey,
+        runIds: new Set<string>(),
+      };
+    }
+    const renderedRuns = renderedCronRunIdsRef.current;
+    for (const snapshot of visibleCronLiveRuns) renderedRuns.runIds.add(snapshot.runId);
+  }, [currentSessionKey, visibleCronLiveRuns]);
 
   useEffect(() => {
     setVisibleSession(currentSessionKey);
@@ -341,6 +377,70 @@ export function Chat() {
     && !workspaceContextCheck.available;
 
   useEffect(() => {
+    const removals = [...pendingCronLiveRunRemovals].sort(
+      (left, right) => left.revision - right.revision,
+    );
+    const pendingRevisions = new Set(removals.map((removal) => removal.revision));
+    const processedRevisions = processedCronRemovalRevisionsRef.current;
+    for (const revision of processedRevisions) {
+      if (!pendingRevisions.has(revision)) processedRevisions.delete(revision);
+    }
+
+    let terminalLoadStarted = false;
+    for (const removal of removals) {
+      if (processedRevisions.has(removal.revision)) continue;
+
+      const renderedRuns = renderedCronRunIdsRef.current;
+      const shouldRefresh = removal.reason === 'ended'
+        && removal.canonicalSessionKey === currentSessionKey
+        && renderedRuns.sessionKey === currentSessionKey
+        && renderedRuns.runIds.has(removal.runId);
+      if (!shouldRefresh) {
+        processedRevisions.add(removal.revision);
+        acknowledgeCronLiveRunRemoval(removal.revision);
+        continue;
+      }
+
+      if (acpSending || acpCancelling || !cwd || !workspaceContextAvailable || terminalLoadStarted) continue;
+      const acpLoadKey = `${currentSessionKey}\0${cwd}`;
+      if (acpLoadInFlightKeyRef.current?.key.startsWith(`${currentSessionKey}\0`)) continue;
+
+      terminalLoadStarted = true;
+      const acpLoadClaim = { key: acpLoadKey, token: Symbol(acpLoadKey) };
+      acpLoadInFlightKeyRef.current = acpLoadClaim;
+      processedRevisions.add(removal.revision);
+      acknowledgeCronLiveRunRemoval(removal.revision);
+
+      let terminalLoad: Promise<boolean>;
+      try {
+        terminalLoad = loadAcpSession({ sessionKey: currentSessionKey, workspaceRoot: cwd, cwd });
+      } catch {
+        if (acpLoadInFlightKeyRef.current === acpLoadClaim) {
+          acpLoadInFlightKeyRef.current = null;
+          setAcpLoadCompletionEpoch((epoch) => epoch + 1);
+        }
+        continue;
+      }
+      void terminalLoad.catch(() => false).finally(() => {
+        if (acpLoadInFlightKeyRef.current === acpLoadClaim) {
+          acpLoadInFlightKeyRef.current = null;
+          setAcpLoadCompletionEpoch((epoch) => epoch + 1);
+        }
+      });
+    }
+  }, [
+    acknowledgeCronLiveRunRemoval,
+    acpCancelling,
+    acpLoadCompletionEpoch,
+    acpSending,
+    currentSessionKey,
+    cwd,
+    loadAcpSession,
+    pendingCronLiveRunRemovals,
+    workspaceContextAvailable,
+  ]);
+
+  useEffect(() => {
     if (currentSessionKey !== DEFAULT_SESSION_KEY || sessions.length > 0 || sessionDiscoveryAttempted) return;
     let cancelled = false;
     void loadSessions()
@@ -366,11 +466,12 @@ export function Chat() {
     if (currentSessionKey === DEFAULT_SESSION_KEY && sessions.length === 0 && acpActiveSessionKey == null && !sessionDiscoveryAttempted) return;
     if (acpActiveSessionKey === currentSessionKey && acpWorkspaceRoot === cwd && acpCwd === cwd) return;
     const acpLoadKey = `${currentSessionKey}\0${cwd}`;
-    if (acpLoadInFlightKeyRef.current === acpLoadKey) return;
+    if (acpLoadInFlightKeyRef.current?.key === acpLoadKey) return;
     const currentSession = sessions.find((session) => session.key === currentSessionKey);
     if (currentSession?.createdLocally) return;
     const createIfMissing = !currentSession;
-    acpLoadInFlightKeyRef.current = acpLoadKey;
+    const acpLoadClaim = { key: acpLoadKey, token: Symbol(acpLoadKey) };
+    acpLoadInFlightKeyRef.current = acpLoadClaim;
     void loadAcpSession({
       sessionKey: currentSessionKey,
       workspaceRoot: cwd,
@@ -381,8 +482,9 @@ export function Chat() {
         acknowledgeAcpSessionCreated(currentSessionKey);
       }
     }).finally(() => {
-      if (acpLoadInFlightKeyRef.current === acpLoadKey) {
+      if (acpLoadInFlightKeyRef.current === acpLoadClaim) {
         acpLoadInFlightKeyRef.current = null;
+        setAcpLoadCompletionEpoch((epoch) => epoch + 1);
       }
     });
   }, [acknowledgeAcpSessionCreated, acpActiveSessionKey, acpCwd, acpWorkspaceRoot, currentSessionKey, cwd, loadAcpSession, sessionDiscoveryAttempted, sessions, workspaceContextAvailable]);
@@ -391,7 +493,7 @@ export function Chat() {
   const isMac = platform === 'darwin';
   const isWindows = platform === 'win32';
   const composerBusy = acpSending || acpCancelling;
-  const showScrollToLatest = acpTimeline.itemOrder.length > 0 && !isAtBottom;
+  const showScrollToLatest = (acpTimeline.itemOrder.length > 0 || visibleCronLiveRuns.length > 0) && !isAtBottom;
   const hasAttemptedAcpPromptForCurrentSession = lastPromptAttemptSessionKey === currentSessionKey;
   const visibleAcpError = !workspaceUnavailable && acpError
     && !(acpTimeline.itemOrder.length === 0 && !hasAttemptedAcpPromptForCurrentSession && isRecoverableInitialAcpLoadError(acpError))
@@ -491,13 +593,15 @@ export function Chat() {
                     />
                   )}
                   {visibleAcpError && <AcpErrorBanner message={visibleAcpError} onDismiss={clearAcpError} />}
-                  {acpLoading ? (
+                  {acpLoading && (
                     <div className="flex min-h-[40vh] items-center justify-center" data-testid="acp-chat-loading">
                       <LoadingSpinner size="md" />
                     </div>
-                  ) : acpTimeline.itemOrder.length === 0 ? (
+                  )}
+                  {!acpLoading && acpTimeline.itemOrder.length === 0 && visibleCronLiveRuns.length === 0 && (
                     <AcpEmptyState />
-                  ) : (
+                  )}
+                  {!acpLoading && acpTimeline.itemOrder.length > 0 && (
                     <AcpTimeline
                       snapshot={acpTimeline}
                       turnTimingsByUserMessageId={acpTurnTimings}
@@ -510,6 +614,12 @@ export function Chat() {
                       }}
                     />
                   )}
+                  {visibleCronLiveRuns.map((snapshot) => (
+                    <CronLiveRunOverlay
+                      key={`${snapshot.canonicalSessionKey}:${snapshot.runId}`}
+                      snapshot={snapshot}
+                    />
+                  ))}
                 </div>
               </div>
 
@@ -571,7 +681,8 @@ export function Chat() {
                 || acpCwd !== promptCwd
               ) {
                 const acpLoadKey = `${sessionKey}\0${promptCwd}`;
-                acpLoadInFlightKeyRef.current = acpLoadKey;
+                const acpLoadClaim = { key: acpLoadKey, token: Symbol(acpLoadKey) };
+                acpLoadInFlightKeyRef.current = acpLoadClaim;
                 const loaded = await (async () => {
                   try {
                     return await loadAcpSession({
@@ -581,8 +692,9 @@ export function Chat() {
                       ...(createIfMissing ? { createIfMissing: true } : {}),
                     });
                   } finally {
-                    if (acpLoadInFlightKeyRef.current === acpLoadKey) {
+                    if (acpLoadInFlightKeyRef.current === acpLoadClaim) {
                       acpLoadInFlightKeyRef.current = null;
+                      setAcpLoadCompletionEpoch((epoch) => epoch + 1);
                     }
                   }
                 })();

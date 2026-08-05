@@ -61,6 +61,7 @@ import { AcpSessionAccessRegistry } from '../services/acp-session-access-registr
 import { createAttachmentAccess, StagedAttachmentRegistry } from '../services/attachment-access';
 import { createAttachmentOpenWithService } from '../services/attachment-open-with';
 import { createCronApi } from '../services/cron-api';
+import type { CronLiveRunBroker } from '../services/cron-live-run-broker';
 import { createFilesApi } from '../services/files-api';
 import { createMediaApi } from '../services/media-api';
 import { createProvidersApi } from '../services/providers-api';
@@ -85,6 +86,7 @@ const gatewayRpcBackpressure = new GatewayRpcBackpressure();
  */
 export function registerIpcHandlers(
   gatewayManager: GatewayManager,
+  cronLiveRunBroker: CronLiveRunBroker,
   clawHubService: ClawHubService,
   mainWindow: BrowserWindow,
   hostApiRegistry: HostApiRegistry,
@@ -97,6 +99,7 @@ export function registerIpcHandlers(
   // Typed host invoke handlers (new renderer facade; legacy channels remain available)
   registerTypedHostHandlers(
     gatewayManager,
+    cronLiveRunBroker,
     clawHubService,
     mainWindow,
     hostApiRegistry,
@@ -143,6 +146,7 @@ export function registerIpcHandlers(
 
 function registerTypedHostHandlers(
   gatewayManager: GatewayManager,
+  cronLiveRunBroker: CronLiveRunBroker,
   clawHubService: ClawHubService,
   mainWindow: BrowserWindow,
   hostApiRegistry: HostApiRegistry,
@@ -180,7 +184,7 @@ function registerTypedHostHandlers(
     media: createMediaApi({ attachmentAccess }),
     sessions: createSessionsApi(),
     chat: createChatApi({ gatewayManager, mainWindow, acpSessionAccessRegistry }),
-    cron: createCronApi({ gatewayManager }),
+    cron: createCronApi({ gatewayManager, cronLiveRunBroker }),
     skills: createSkillsApi({ clawHubService, gatewayManager }),
     usage: createUsageApi(),
   });

@@ -40,6 +40,11 @@ const onChatEvent = <E extends HostEventName<'chat'>>(
   handler: HostEventHandler<'chat', E>,
 ) => onIpc(HOST_EVENT_CHANNELS.chat[event], handler);
 
+const onCronEvent = <E extends HostEventName<'cron'>>(
+  event: E,
+  handler: HostEventHandler<'cron', E>,
+) => onIpc(HOST_EVENT_CHANNELS.cron[event], handler);
+
 const onOAuthEvent = <E extends HostEventName<'oauth'>>(
   event: E,
   handler: HostEventHandler<'oauth', E>,
@@ -98,6 +103,9 @@ export const hostEvents = {
   onAcpPermissionRequest: (handler: HostEventHandler<'chat', 'acpPermissionRequest'>) => (
     onChatEvent('acpPermissionRequest', handler)
   ),
+  onCronLiveRunOverlayChanged: (
+    handler: HostEventHandler<'cron', 'liveRunOverlayChanged'>,
+  ) => onCronEvent('liveRunOverlayChanged', handler),
   onOAuthCode: (handler: HostEventHandler<'oauth', 'code'>) => onOAuthEvent('code', handler),
   onOAuthSuccess: (handler: HostEventHandler<'oauth', 'success'>) => onOAuthEvent('success', handler),
   onOAuthError: (handler: HostEventHandler<'oauth', 'error'>) => onOAuthEvent('error', handler),

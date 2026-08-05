@@ -2,8 +2,10 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { CompleteHostServiceRegistry } from '../main/ipc/host-contract';
 import type { RawMessage } from '@shared/chat/types';
+import { parseCronSessionKey, type CronSessionKeyParts } from '@shared/chat/cron-session';
 import type { CronJob, CronJobDelivery, CronSchedule } from '@shared/types/cron';
 import type { GatewayManager } from '../gateway/manager';
+import type { CronLiveRunBroker } from './cron-live-run-broker';
 import { getOpenClawConfigDir } from '../utils/paths';
 import { resolveAgentIdFromChannel } from '../utils/agent-config';
 import { toOpenClawChannelType, toUiChannelType } from '../utils/channel-alias';
@@ -47,12 +49,6 @@ interface CronRunLogEntry {
   provider?: string;
 }
 
-interface CronSessionKeyParts {
-  agentId: string;
-  jobId: string;
-  runSessionId?: string;
-}
-
 interface CronSessionFallbackMessage {
   id: string;
   role: 'user' | 'assistant';
@@ -63,20 +59,6 @@ interface CronSessionFallbackMessage {
 
 type JsonRecord = Record<string, unknown>;
 const OPENCLAW_CRON_SUMMARY_TRUNCATION_MIN_CHARS = 2_000;
-
-function parseCronSessionKey(sessionKey: string): CronSessionKeyParts | null {
-  if (!sessionKey.startsWith('agent:')) return null;
-  const parts = sessionKey.split(':');
-  if (parts.length < 4 || parts[2] !== 'cron') return null;
-  const agentId = parts[1] || 'main';
-  const jobId = parts[3];
-  if (!jobId) return null;
-  if (parts.length === 4) return { agentId, jobId };
-  if (parts.length === 6 && parts[4] === 'run' && parts[5]) {
-    return { agentId, jobId, runSessionId: parts[5] };
-  }
-  return null;
-}
 
 function normalizeTimestampMs(value: unknown): number | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) {
@@ -579,8 +561,15 @@ function getId(payload: unknown): string {
   return id.trim();
 }
 
-export function createCronApi({ gatewayManager }: { gatewayManager: GatewayManager }): CompleteHostServiceRegistry['cron'] {
+export function createCronApi({
+  gatewayManager,
+  cronLiveRunBroker,
+}: {
+  gatewayManager: GatewayManager;
+  cronLiveRunBroker: CronLiveRunBroker;
+}): CompleteHostServiceRegistry['cron'] {
   return {
+    liveRunOverlays: () => cronLiveRunBroker.getSnapshotSet(),
     list: async () => listCronJobs(gatewayManager),
     create: async (payload) => {
       const input = payload;

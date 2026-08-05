@@ -253,6 +253,35 @@
         "generatedReady": "Generated image is ready.",
         "generatedReadyWithMissing": "Generated image is ready. Some images could not be loaded."
     },
+    "cronLiveRun": {
+        "title": "Live scheduled run",
+        "transient": "Transient, read-only progress. Final content appears in chat after the run finishes.",
+        "running": "Running",
+        "thinking": "Thinking",
+        "item": {
+            "tool": "Tool",
+            "command": "Command",
+            "patch": "Patch",
+            "approval": "Approval"
+        },
+        "status": {
+            "running": "Running",
+            "completed": "Completed",
+            "failed": "Failed"
+        },
+        "detail": {
+            "input": "Input",
+            "output": "Output",
+            "error": "Error",
+            "exitCode": "Exit code: {{code}}"
+        },
+        "patch": {
+            "added": "Added: {{count}}",
+            "modified": "Modified: {{count}}",
+            "deleted": "Deleted: {{count}}"
+        },
+        "approvalReadOnly": "Read-only status. Respond in the originating client."
+    },
     "composer": {
         "attachFiles": "Attach files",
         "pickSkill": "Choose skill",

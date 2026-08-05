@@ -33,6 +33,18 @@ ownedPaths:
   - tests/unit/web-browser-policy.test.ts
   - tests/unit/web-browser-session.test.ts
   - tests/unit/web-browser-api.test.ts
+  - shared/chat/cron-session.ts
+  - shared/chat/cron-live-run.ts
+  - shared/host-api/contract.ts
+  - shared/host-events/contract.ts
+  - electron/services/cron-live-run-broker.ts
+  - src/lib/host-events.ts
+  - src/stores/cron-live-run-overlay.ts
+  - src/pages/Chat/CronLiveRunOverlay.tsx
+  - tests/unit/cron-live-run-broker.test.ts
+  - tests/unit/cron-live-run-overlay-store.test.ts
+  - tests/unit/cron-live-run-overlay.test.tsx
+  - tests/e2e/cron-run-live-status.spec.ts
 requiredProfiles:
   - fast
   - comms
@@ -56,6 +68,9 @@ requiredRules:
   - provider-default-invariant
   - provider-model-metadata-preservation
   - provider-model-selection-authority
+  - acp-chat-state-and-history
+  - acp-compatibility-content-safety
+  - ui-i18n-design-tokens
   - sidebar-session-attention-authority
   - web-browser-security-and-lifecycle
   - comms-regression
@@ -85,6 +100,8 @@ Renderer code must not create direct Gateway WebSocket connections. Gateway fram
 Channel/plugin migration behavior is also part of this scenario when ClawX rewrites OpenClaw config before Gateway launch. Upgrades must preserve single-owner channel registration for migrated plugin-backed channels such as Feishu/Lark.
 
 Scheduled-task history is Main-owned backend data. Current OpenClaw versions must be queried through the Gateway `cron.runs` RPC; direct run-log file reads are allowed only as a compatibility fallback for older file-backed runtimes. When a run's bounded summary ends with OpenClaw's truncation ellipsis, Main may recover the complete final assistant reply from the run transcript identified by that `cron.runs` entry, but only when the transcript reply is longer and shares the entire summary prefix. When a cron base session has no ACP replay, Renderer may project that typed host result into a generation-scoped, in-memory historical ACP timeline, but must not replace or duplicate non-empty ACP replay.
+
+Running cron progress has one narrower, non-historical path: strict run-scoped cron Gateway events may enter a bounded Main-owned broker and reach Renderer as an explicit read-only live overlay through typed host-api and host-events contracts. The overlay remains separate from ACP updates, ACP timeline reduction, cron history, prompt state, and sidebar attention; terminal events remove it before authoritative ACP or typed cron-history reload. The durable exception and its bounds are documented in `harness/reference/acp-cron-live-overlay.md`.
 
 The local HTML Preview privileged bridge is also Main-owned: Renderer may load a validated local HTML file or open that current file externally through the typed Host API. The guest is an implementation detail of the existing `preview` tab; there is no `web-browser` artifact tab or general address navigation. The durable guest contract is `harness/reference/web-browser.md`.
 

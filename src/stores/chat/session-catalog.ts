@@ -1,5 +1,5 @@
 import type { ChatSession, GatewaySessionsChangedPayload } from './types';
-import { parseCronSessionKey } from './cron-session-utils';
+import { parseCronSessionKey } from '@shared/chat/cron-session';
 import { shouldIncludeSessionInSidebarList } from './session-key-utils';
 
 export type { GatewaySessionsChangedPayload } from './types';

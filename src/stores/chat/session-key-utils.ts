@@ -4,7 +4,7 @@ import {
   isOpenClawHeartbeatAckText,
   OPENCLAW_HEARTBEAT_POLL_SENTINEL,
 } from '@shared/chat/openclaw-internal';
-import { isCronSessionKey } from './cron-session-utils';
+import { isCronSessionKey } from '@shared/chat/cron-session';
 import type { ChatSession } from './types';
 
 const CHANNEL_SESSION_SEGMENTS = new Set<string>(Object.keys(CHANNEL_NAMES));

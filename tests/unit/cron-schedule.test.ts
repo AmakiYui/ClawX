@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createCronApi } from '../../electron/services/cron-api';
+import { CronLiveRunBroker } from '../../electron/services/cron-live-run-broker';
 import type { GatewayManager } from '../../electron/gateway/manager';
 
 const sessionMocks = vi.hoisted(() => ({
@@ -39,11 +40,24 @@ function setupCronApi() {
     return makeGatewayJob({ kind: 'cron', expr: '* * * * *' });
   });
   const gatewayManager = { rpc } as unknown as GatewayManager;
-  const api = createCronApi({ gatewayManager });
+  const api = createCronApi({ gatewayManager, cronLiveRunBroker: new CronLiveRunBroker() });
   return { api, calls };
 }
 
 describe('cron schedule normalization', () => {
+  it('hydrates live-run overlays from the injected broker', () => {
+    const gatewayManager = { rpc: vi.fn() } as unknown as GatewayManager;
+    const cronLiveRunBroker = new CronLiveRunBroker(() => 100);
+    cronLiveRunBroker.ingestRuntimeEvent({
+      type: 'run.started',
+      runId: 'run-1',
+      sessionKey: 'agent:main:cron:job-1:run:session-1',
+    });
+    const api = createCronApi({ gatewayManager, cronLiveRunBroker });
+
+    expect(api.liveRunOverlays()).toEqual(cronLiveRunBroker.getSnapshotSet());
+  });
+
   it('wraps a plain cron expression string into a cron schedule on create', async () => {
     const { api, calls } = setupCronApi();
     await api.create({ name: 'n', message: 'm', schedule: '0 9 * * *' });
@@ -103,7 +117,10 @@ describe('cron session history', () => {
       }
       return {};
     });
-    const api = createCronApi({ gatewayManager: { rpc } as unknown as GatewayManager });
+    const api = createCronApi({
+      gatewayManager: { rpc } as unknown as GatewayManager,
+      cronLiveRunBroker: new CronLiveRunBroker(),
+    });
 
     const result = await api.sessionHistory({
       sessionKey: 'agent:main:cron:job-1',
@@ -151,7 +168,10 @@ describe('cron session history', () => {
       { role: 'user', content: 'hi' },
       { role: 'assistant', content: [{ type: 'text', text: fullReply }], stopReason: 'stop' },
     ]);
-    const api = createCronApi({ gatewayManager: { rpc } as unknown as GatewayManager });
+    const api = createCronApi({
+      gatewayManager: { rpc } as unknown as GatewayManager,
+      cronLiveRunBroker: new CronLiveRunBroker(),
+    });
 
     const result = await api.sessionHistory({
       sessionKey: 'agent:main:cron:job-1',
@@ -191,7 +211,10 @@ describe('cron session history', () => {
     sessionMocks.loadSessionTranscriptByKey.mockResolvedValue([
       { role: 'assistant', content: `${'X'.repeat(2000)}more` },
     ]);
-    const api = createCronApi({ gatewayManager: { rpc } as unknown as GatewayManager });
+    const api = createCronApi({
+      gatewayManager: { rpc } as unknown as GatewayManager,
+      cronLiveRunBroker: new CronLiveRunBroker(),
+    });
 
     const result = await api.sessionHistory({
       sessionKey: 'agent:main:cron:job-1',

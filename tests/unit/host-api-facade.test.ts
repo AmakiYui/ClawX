@@ -510,6 +510,21 @@ describe('hostApi facade', () => {
     }));
   });
 
+  it('calls cron.liveRunOverlays through hostInvoke', async () => {
+    hostInvoke.mockResolvedValueOnce({
+      id: 'req',
+      ok: true,
+      data: { revision: 4, snapshots: [] },
+    });
+    const { hostApi } = await import('@/lib/host-api');
+
+    await expect(hostApi.cron.liveRunOverlays()).resolves.toEqual({ revision: 4, snapshots: [] });
+    expect(hostInvoke).toHaveBeenCalledWith(expect.objectContaining({
+      module: 'cron',
+      action: 'liveRunOverlays',
+    }));
+  });
+
   it('calls skills.clawhubList through hostInvoke', async () => {
     hostInvoke.mockResolvedValueOnce({ id: 'req', ok: true, data: { success: true, results: [] } });
     const { hostApi } = await import('@/lib/host-api');

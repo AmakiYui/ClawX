@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { parseCronSessionKey } from './chat/cron-session-utils';
+import { parseCronSessionKey } from '@shared/chat/cron-session';
 import { projectSessionRunState } from './chat/session-status';
 import type { ChatSession } from './chat/types';
 

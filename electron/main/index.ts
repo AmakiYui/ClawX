@@ -5,7 +5,12 @@
 import { app, BrowserWindow, nativeImage, session, shell, type Session } from 'electron';
 import { join } from 'path';
 import { GatewayManager } from '../gateway/manager';
+import {
+  bindCronLiveRunBroker,
+  CronLiveRunBroker,
+} from '../services/cron-live-run-broker';
 import { registerIpcHandlers } from './ipc-handlers';
+import { HOST_EVENT_CHANNELS } from '@shared/host-events/contract';
 import { HostApiRegistry } from './ipc/host-invoke';
 import { createTray } from './tray';
 import { createMenu } from './menu';
@@ -133,6 +138,7 @@ const gotTheLock = gotElectronLock && gotFileLock;
 // Global references
 let mainWindow: BrowserWindow | null = null;
 let gatewayManager!: GatewayManager;
+let cronLiveRunBroker!: CronLiveRunBroker;
 let clawHubService!: ClawHubService;
 const hostApiRegistry = new HostApiRegistry();
 const webBrowserGuestRegistry = new WebBrowserGuestRegistry();
@@ -372,6 +378,7 @@ async function initialize(): Promise<void> {
   // Register IPC handlers
   registerIpcHandlers(
     gatewayManager,
+    cronLiveRunBroker,
     clawHubService,
     window,
     hostApiRegistry,
@@ -506,6 +513,14 @@ async function initialize(): Promise<void> {
     sendMainWindowEvent('gateway:exit', { code });
   });
 
+  bindCronLiveRunBroker({
+    gatewayManager,
+    broker: cronLiveRunBroker,
+    publishChange: (change) => {
+      sendMainWindowEvent(HOST_EVENT_CHANNELS.cron.liveRunOverlayChanged, change);
+    },
+  });
+
   deviceOAuthManager.on('oauth:code', (payload) => {
     sendMainWindowEvent('oauth:code', payload);
   });
@@ -604,6 +619,7 @@ if (gotTheLock) {
   }
 
   gatewayManager = new GatewayManager();
+  cronLiveRunBroker = new CronLiveRunBroker();
   clawHubService = new ClawHubService();
 
   // Register builtin extensions and load manifest

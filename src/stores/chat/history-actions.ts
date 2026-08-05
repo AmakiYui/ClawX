@@ -21,7 +21,7 @@ import {
   setLastChatEventAt,
   toMs,
 } from './helpers';
-import { isCronSessionKey } from './cron-session-utils';
+import { isCronSessionKey } from '@shared/chat/cron-session';
 import {
   CHAT_HISTORY_STARTUP_RETRY_DELAYS_MS,
   classifyHistoryStartupRetryError,

@@ -1,4 +1,4 @@
-import { isCronSessionKey } from './cron-session-utils';
+import { isCronSessionKey } from '@shared/chat/cron-session';
 import { isChannelSessionKey } from './session-key-utils';
 import type { ChatSession } from './types';
 

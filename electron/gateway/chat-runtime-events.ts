@@ -53,13 +53,15 @@ export function normalizeGatewayChatRuntimeEvent(payload: unknown): ChatRuntimeE
         : null;
     }
 
-    if (phase === 'completed' || phase === 'done' || phase === 'finished') {
+    if (phase === 'end' || phase === 'completed' || phase === 'done' || phase === 'finished') {
       const base = withBase('run.ended', raw);
+      const aborted = phase === 'end' && data.aborted === true;
       return base
         ? {
             ...base,
-            status: 'completed',
+            status: aborted ? 'aborted' : 'completed',
             endedAt: readNumber(data.endedAt),
+            ...(aborted ? { error: readString(data.error) } : {}),
             livenessState: readString(data.livenessState),
             replayInvalid: typeof data.replayInvalid === 'boolean' ? data.replayInvalid : undefined,
             stopReason: readString(data.stopReason),
@@ -90,6 +92,8 @@ export function normalizeGatewayChatRuntimeEvent(payload: unknown): ChatRuntimeE
             status: 'aborted',
             endedAt: readNumber(data.endedAt),
             error: readString(data.error),
+            livenessState: readString(data.livenessState),
+            replayInvalid: typeof data.replayInvalid === 'boolean' ? data.replayInvalid : undefined,
             stopReason: readString(data.stopReason),
           }
         : null;

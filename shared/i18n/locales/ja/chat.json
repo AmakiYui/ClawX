@@ -253,6 +253,35 @@
         "generatedReady": "生成された画像の準備ができました。",
         "generatedReadyWithMissing": "生成された画像の準備ができましたが、一部の画像を読み込めませんでした。"
     },
+    "cronLiveRun": {
+        "title": "スケジュール実行のライブ状況",
+        "transient": "一時的な読み取り専用の進行状況です。最終内容は実行終了後にチャットへ表示されます。",
+        "running": "実行中",
+        "thinking": "考え中",
+        "item": {
+            "tool": "ツール",
+            "command": "コマンド",
+            "patch": "パッチ",
+            "approval": "承認"
+        },
+        "status": {
+            "running": "実行中",
+            "completed": "完了",
+            "failed": "失敗"
+        },
+        "detail": {
+            "input": "入力",
+            "output": "出力",
+            "error": "エラー",
+            "exitCode": "終了コード: {{code}}"
+        },
+        "patch": {
+            "added": "追加: {{count}}",
+            "modified": "変更: {{count}}",
+            "deleted": "削除: {{count}}"
+        },
+        "approvalReadOnly": "この状態は読み取り専用です。要求元のクライアントで応答してください。"
+    },
     "composer": {
         "attachFiles": "ファイルを添付",
         "pickSkill": "Skill を選択",

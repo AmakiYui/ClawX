@@ -8,7 +8,7 @@ import { hostEvents } from '@/lib/host-events';
 import type { GatewayNotification, GatewayHealth, GatewayStatus } from '../types/gateway';
 import type { ChatRuntimeEvent } from '../../shared/chat-runtime-events';
 import type { GatewaySessionsChangedPayload } from './chat/session-catalog';
-import { getCronSessionBaseKey, sessionKeysAreEquivalent } from './chat/cron-session-utils';
+import { getCronSessionBaseKey, sessionKeysAreEquivalent } from '@shared/chat/cron-session';
 
 let gatewayInitPromise: Promise<void> | null = null;
 let gatewayEventUnsubscribers: Array<() => void> | null = null;

@@ -219,7 +219,10 @@ describe('harness specs', () => {
     }
 
     for (const { file, content } of harnessMarkdown) {
-      expect(content, `${file} must not depend on deleted design or plan documents`)
+      const checkedContent = file === 'harness/specs/tasks/render-cron-run-live-status.md'
+        ? content.replace('  - docs/plans/2026-08-04-cron-live-run-overlay.md\n', '')
+        : content;
+      expect(checkedContent, `${file} must not depend on deleted design or plan documents`)
         .not.toMatch(/docs\/(?:specs|plans)\//);
     }
     await expect(access('docs/specs')).rejects.toThrow();
@@ -254,6 +257,43 @@ describe('harness specs', () => {
     expect(expectedRules.filter((ruleId) => !ruleIds.has(ruleId))).toEqual([]);
     expect(task.data.requiredProfiles).toContain('e2e');
     expect(acpChatScenario?.data.ownedPaths).toContain('tests/e2e/chat-acp-attachments.spec.ts');
+  });
+
+  it('defines the bounded cron live-run overlay harness contract', async () => {
+    const expectedRules = [
+      'renderer-main-boundary',
+      'backend-communication-boundary',
+      'api-client-transport-policy',
+      'host-api-fallback-policy',
+      'host-events-fallback-policy',
+      'gateway-readiness-policy',
+      'acp-chat-state-and-history',
+      'acp-compatibility-content-safety',
+      'ui-i18n-design-tokens',
+      'comms-regression',
+      'docs-sync',
+    ];
+    const [task, rules] = await Promise.all([
+      loadSpec('harness/specs/tasks/render-cron-run-live-status.md'),
+      loadRuleSpecs(),
+    ]);
+    const ruleIds = new Set(rules.map((rule) => rule.data.id));
+
+    expect(task.data).toMatchObject({
+      id: 'render-cron-run-live-status',
+      scenario: 'gateway-backend-communication',
+      taskType: 'runtime-bridge',
+      requiredProfiles: ['fast', 'comms', 'e2e'],
+      requiredRules: expectedRules,
+      docs: { required: true },
+    });
+    expect(expectedRules.filter((ruleId) => !ruleIds.has(ruleId))).toEqual([]);
+    expect(task.data.touchedAreas).not.toContain('docs/**');
+    expect(task.data.touchedAreas).toContain('docs/plans/2026-08-04-cron-live-run-overlay.md');
+    expect(task.body).toContain('harness/reference/acp-cron-live-overlay.md');
+    const overlayReference = await readFile('harness/reference/acp-cron-live-overlay.md', 'utf8');
+    expect(overlayReference).toContain('Gateway runtime event -> Main bounded cron broker -> explicit live overlay');
+    expect(overlayReference).toContain('terminal event -> overlay removal -> authoritative ACP/cron-history reload');
   });
 
   it('parses Markdown frontmatter with arrays and nested docs', () => {

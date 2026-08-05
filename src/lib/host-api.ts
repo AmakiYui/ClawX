@@ -374,6 +374,7 @@ export const hostApi = {
     ),
   },
   cron: {
+    liveRunOverlays: () => invokeHost('cron', 'liveRunOverlays'),
     list: () => invokeHost('cron', 'list'),
     create: (input: CronJobCreateInput) => invokeHost('cron', 'create', input),
     update: (id: string, input: CronJobUpdateInput) => invokeHost('cron', 'update', { id, input }),

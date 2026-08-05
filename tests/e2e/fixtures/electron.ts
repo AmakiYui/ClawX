@@ -18,6 +18,7 @@ type IpcMockConfig = {
   gatewayRpc?: Record<string, unknown>;
   hostApi?: Record<string, unknown>;
   hostApiErrors?: Record<string, string>;
+  failUnmatchedHostApiActions?: string[];
   recordHostInvocations?: boolean;
   recordLegacyIpcInvocations?: boolean;
 };
@@ -491,7 +492,13 @@ export async function installIpcMocks(
         return null;
       };
 
-      if (mockConfig.gatewayRpc || mockConfig.hostApi || mockConfig.hostApiErrors || mockConfig.gatewayStatus) {
+      if (
+        mockConfig.gatewayRpc
+        || mockConfig.hostApi
+        || mockConfig.hostApiErrors
+        || mockConfig.gatewayStatus
+        || mockConfig.failUnmatchedHostApiActions
+      ) {
         ipcMain.removeHandler('host:invoke');
         ipcMain.handle('host:invoke', async (event: unknown, request: {
           id?: string;
@@ -595,6 +602,11 @@ export async function installIpcMocks(
                 return respond(request.id, await legacyFileListTree(event, path, payload.opts));
               }
             }
+          }
+
+          const hostApiAction = `${request?.module ?? ''}.${request?.action ?? ''}`;
+          if (mockConfig.failUnmatchedHostApiActions?.includes(hostApiAction)) {
+            return fail(request?.id, `Unmatched host API mock: ${hostApiAction}`);
           }
 
           return originalHostInvoke?.(event, request) ?? respond(request?.id, {});

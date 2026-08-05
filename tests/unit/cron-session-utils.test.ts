@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   getCronSessionBaseKey,
   isCronSessionKey,
+  isRunScopedCronSessionKey,
   parseCronSessionKey,
   sessionKeysAreEquivalent,
-} from '@/stores/chat/cron-session-utils';
+} from '@shared/chat/cron-session';
 
 const BASE = 'agent:product:cron:294717ee-6dde-45a8-8f67-900e2831cc4f';
 const RUN = `${BASE}:run:0bfbc08a-7582-4c88-9fd3-47c484e17660`;
@@ -28,6 +29,37 @@ describe('parseCronSessionKey', () => {
   it('rejects non-cron keys', () => {
     expect(parseCronSessionKey('agent:main:main')).toBeNull();
     expect(isCronSessionKey('agent:main:main')).toBe(false);
+  });
+
+  it.each([
+    'agent::cron:job',
+    'agent:   :cron:job',
+    'agent:main:cron:',
+    'agent:main:cron:   ',
+    'agent:main:cron:job:run:',
+    'agent:main:cron:job:run:   ',
+  ])('rejects empty or whitespace-only identity segments in %j', (sessionKey) => {
+    expect(parseCronSessionKey(sessionKey)).toBeNull();
+    expect(isCronSessionKey(sessionKey)).toBe(false);
+  });
+
+  it.each([
+    'agent:main:cron:job:run',
+    'agent:main:cron:job:other:run-id',
+    'agent:main:cron:job:run:run-id:extra',
+    'agent:main:cron:job:extra',
+  ])('rejects malformed cron suffixes in %j', (sessionKey) => {
+    expect(parseCronSessionKey(sessionKey)).toBeNull();
+    expect(isCronSessionKey(sessionKey)).toBe(false);
+  });
+});
+
+describe('isRunScopedCronSessionKey', () => {
+  it('accepts only strict run-scoped cron session keys', () => {
+    expect(isRunScopedCronSessionKey(RUN)).toBe(true);
+    expect(isRunScopedCronSessionKey(BASE)).toBe(false);
+    expect(isRunScopedCronSessionKey(`${BASE}:run:`)).toBe(false);
+    expect(isRunScopedCronSessionKey(`${BASE}:other:run-id`)).toBe(false);
   });
 });
 

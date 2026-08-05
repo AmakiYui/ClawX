@@ -13,6 +13,28 @@ beforeEach(() => {
 });
 
 describe('hostEvents', () => {
+  it('defines and subscribes to cron live-run overlay changes over IPC', async () => {
+    const { HOST_EVENT_CHANNELS } = await import('@shared/host-events/contract');
+    const { hostEvents } = await import('@/lib/host-events');
+    const handler = vi.fn();
+
+    hostEvents.onCronLiveRunOverlayChanged(handler);
+    const callback = on.mock.calls[0]?.[1] as ((payload: unknown) => void) | undefined;
+    const change = {
+      kind: 'remove',
+      revision: 2,
+      canonicalSessionKey: 'agent:main:cron:daily-report',
+      sourceSessionKey: 'agent:main:cron:daily-report:run:session-1',
+      runId: 'run-1',
+      reason: 'ended',
+    };
+    callback?.(change);
+
+    expect(HOST_EVENT_CHANNELS.cron.liveRunOverlayChanged).toBe('cron:live-run-overlay-changed');
+    expect(on).toHaveBeenCalledWith('cron:live-run-overlay-changed', expect.any(Function));
+    expect(handler).toHaveBeenCalledWith(change);
+  });
+
   it('subscribes to gateway status over IPC', async () => {
     on.mockReturnValueOnce(() => undefined);
     const { hostEvents } = await import('@/lib/host-events');

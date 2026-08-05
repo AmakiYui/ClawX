@@ -4,6 +4,7 @@ import type {
 } from '../acp-chat/types';
 import type { UpdateStatusSnapshot } from '../host-api/contract';
 import type { ChatRuntimeEvent } from '../chat-runtime-events';
+import type { CronLiveRunOverlayChange } from '../chat/cron-live-run';
 import type {
   GatewayNotification,
   GatewayRuntimePayload,
@@ -82,6 +83,9 @@ export type HostEventContract = {
     acpSessionUpdate: (payload: AcpSessionUpdateEnvelope) => void;
     acpPermissionRequest: (payload: AcpPermissionRequestEnvelope) => void;
   };
+  cron: {
+    liveRunOverlayChanged: (payload: CronLiveRunOverlayChange) => void;
+  };
   oauth: {
     code: (payload: OAuthCodeEvent) => void;
     success: (payload: OAuthSuccessEvent) => void;
@@ -130,6 +134,9 @@ export const HOST_EVENT_CHANNELS = {
     runtimeEvent: 'chat:runtime-event',
     acpSessionUpdate: 'chat:acp-session-update',
     acpPermissionRequest: 'chat:acp-permission-request',
+  },
+  cron: {
+    liveRunOverlayChanged: 'cron:live-run-overlay-changed',
   },
   oauth: {
     code: 'oauth:code',

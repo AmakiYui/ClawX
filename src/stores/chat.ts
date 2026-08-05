@@ -14,7 +14,7 @@ import { useGatewayStore } from './gateway';
 import { useAgentsStore } from './agents';
 import type { ChatRuntimeEvent } from '../../shared/chat-runtime-events';
 import { buildBaselineRunKey, captureBaseline, clearBaselines } from './baseline-cache';
-import { isCronSessionKey, sessionKeysAreEquivalent } from './chat/cron-session-utils';
+import { isCronSessionKey, sessionKeysAreEquivalent } from '@shared/chat/cron-session';
 import {
   findHiddenOpenClawHeartbeatSession,
   isClawXDesktopSessionKey,

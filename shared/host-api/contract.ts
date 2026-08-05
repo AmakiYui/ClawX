@@ -6,6 +6,7 @@ import type {
   AcpChatRespondPermissionPayload,
 } from '../acp-chat/types';
 import type { RawMessage } from '../chat/types';
+import type { CronLiveRunOverlaySnapshotSet } from '../chat/cron-live-run';
 import type { AgentsSnapshot } from '../types/agent';
 import type { CronJob, CronJobCreateInput, CronJobUpdateInput } from '../types/cron';
 import type { GatewayHealth, GatewayStatus } from '../types/gateway';
@@ -994,6 +995,7 @@ export type HostApiContract = {
     respondAcpPermission: (payload: AcpChatRespondPermissionPayload) => AcpChatOperationResult;
   };
   cron: {
+    liveRunOverlays: () => CronLiveRunOverlaySnapshotSet;
     list: () => CronJob[];
     create: (payload: CronJobCreateInput) => CronJob;
     update: (payload: CronUpdatePayload) => CronJob;

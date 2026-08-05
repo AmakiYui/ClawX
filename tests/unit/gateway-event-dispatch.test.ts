@@ -48,7 +48,11 @@ describe('dispatchProtocolEvent', () => {
     expect(emitter.emit).toHaveBeenCalledWith('chat:message', { message: { text: 'hello' } });
   });
 
-  it('does not normalize non-terminal lifecycle phase=end as run.ended', () => {
+  it.each([
+    { phase: 'end', aborted: undefined, status: 'completed' },
+    { phase: 'end', aborted: true, status: 'aborted' },
+    { phase: 'error', aborted: undefined, status: 'error' },
+  ] as const)('normalizes lifecycle phase=$phase as run.ended with status=$status', ({ phase, aborted, status }) => {
     const emitter = createMockEmitter();
     const payload = {
       runId: 'run-1',
@@ -57,16 +61,25 @@ describe('dispatchProtocolEvent', () => {
       seq: 4,
       ts: 10,
       data: {
-        phase: 'end',
+        phase,
+        ...(aborted === undefined ? {} : { aborted }),
         endedAt: 11,
+        livenessState: 'settled',
+        replayInvalid: false,
+        stopReason: 'terminal',
       },
     };
 
     dispatchProtocolEvent(emitter, 'agent', payload);
 
-    expect(emitter.emit).not.toHaveBeenCalledWith('chat:runtime-event', expect.objectContaining({
+    expect(emitter.emit).toHaveBeenCalledWith('chat:runtime-event', expect.objectContaining({
       type: 'run.ended',
       runId: 'run-1',
+      status,
+      endedAt: 11,
+      livenessState: 'settled',
+      replayInvalid: false,
+      stopReason: 'terminal',
     }));
     expect(emitter.emit).toHaveBeenCalledWith('notification', {
       method: 'agent',
