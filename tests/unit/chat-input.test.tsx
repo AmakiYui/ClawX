@@ -724,7 +724,10 @@ describe('ChatInput agent targeting', () => {
     fireEvent.click(screen.getByTestId('chat-model-picker-button'));
     expect(screen.getByText('Reasoning effort')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('chat-reasoning-effort-menu-trigger'));
-    expect(screen.getByTestId('chat-reasoning-effort-menu')).toHaveTextContent(
+    const reasoningMenu = screen.getByTestId('chat-reasoning-effort-menu');
+    expect(reasoningMenu).toHaveClass('w-52');
+    expect(reasoningMenu).not.toHaveClass('w-72');
+    expect(reasoningMenu).toHaveTextContent(
       'Higher effort gives more thorough responses.',
     );
     expect(screen.queryByTestId('chat-reasoning-effort-option-inherited')).not.toBeInTheDocument();

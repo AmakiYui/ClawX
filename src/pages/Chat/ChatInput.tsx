@@ -1304,7 +1304,7 @@ export function ChatInput({
                     </div>
                     {reasoningMenuOpen && (
                       <div
-                        className="absolute bottom-0 right-full z-30 mr-2 w-72 rounded-2xl border border-black/10 bg-surface-modal p-1.5 shadow-xl dark:border-white/10"
+                        className="absolute bottom-0 right-full z-30 mr-2 w-52 rounded-2xl border border-black/10 bg-surface-modal p-1.5 shadow-xl dark:border-white/10"
                         data-testid="chat-reasoning-effort-menu"
                       >
                         <p className="px-3 py-2 text-xs leading-5 text-muted-foreground">

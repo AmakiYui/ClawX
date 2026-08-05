@@ -46,7 +46,7 @@ expectedUserBehavior:
   - The Chat model button shows the effective reasoning effort for the current session.
   - The model menu directly offers the advertised members of the Off, Low, Medium, and High product ladder.
   - A new local draft can use the current agent's Gateway-advertised session defaults before its first prompt creates a persisted session row.
-  - Reasoning effort opens in a dedicated submenu without a separate Thinking toggle.
+  - Reasoning effort opens in a compact dedicated submenu without a separate Thinking toggle.
   - Selecting Off, Low, Medium, or High persists that explicit current-session override through Gateway sessions.patch.
   - Each ACP prompt carries the same explicit reasoning effort selected for its current session instead of falling back to a different prompt-level effort.
   - A message cannot be sent while an effort change is still being applied.
@@ -83,6 +83,7 @@ acceptance:
   - A local draft falls back only to agent-scoped sessions.list defaults, and a persisted session row always takes precedence.
   - Custom-provider primary models are synced with a fixed OpenClaw reasoning ladder; provider settings do not expose enable-reasoning controls.
   - Explicit off is distinct from a cleared override.
+  - The reasoning-effort submenu stays narrower than the parent model menu while preserving readable wrapped guidance.
   - An explicit user-selected session level is forwarded unchanged in ACP prompt metadata; an inherited session adds no prompt-level override.
   - Failed patches restore the prior session state and leave the message available to send.
   - New labels are localized in English, Chinese, Japanese, and Russian.
