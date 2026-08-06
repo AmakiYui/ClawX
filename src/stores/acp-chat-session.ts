@@ -227,6 +227,34 @@ function captureLiveSession(state: AcpChatSessionState): void {
   });
 }
 
+function restoreImageGenerationProjections(
+  timeline: AcpTimelineSnapshot,
+  snapshot: AcpTimelineSnapshot,
+): AcpTimelineSnapshot {
+  let restored = timeline;
+  const restoredIds = new Set(timeline.itemOrder);
+  for (const [index, itemId] of snapshot.itemOrder.entries()) {
+    const item = snapshot.itemsById[itemId];
+    if (item?.kind !== 'message-segment' || item.compat?.source !== 'image-generation') continue;
+    let afterItemId: string | undefined;
+    for (let priorIndex = index - 1; priorIndex >= 0; priorIndex -= 1) {
+      const priorItemId = snapshot.itemOrder[priorIndex];
+      if (priorItemId && restoredIds.has(priorItemId)) {
+        afterItemId = priorItemId;
+        break;
+      }
+    }
+    restored = appendSyntheticAssistantMessage(restored, {
+      messageId: item.messageId,
+      evidenceId: item.compat.evidenceId,
+      parts: item.parts,
+      afterItemId,
+    });
+    restoredIds.add(itemId);
+  }
+  return restored;
+}
+
 function compatSession(sessionKey: string): ImageGenerationCompatSession {
   const existing = imageGenerationCompatSessions.get(sessionKey);
   if (existing) return existing;
@@ -1129,6 +1157,9 @@ export const useAcpChatSessionStore = create<AcpChatSessionState>((set, get) => 
           timeline = applyAcpSessionUpdate(timeline, notification, { historical: true });
         }
       }
+      if (!currentResumedSnapshot && restorableBackgroundSnapshot) {
+        timeline = restoreImageGenerationProjections(timeline, restorableBackgroundSnapshot.timeline);
+      }
       const pendingAttachments = newPendingAttachments(
         createEmptyAcpTimeline(input.sessionKey, generation),
         timeline,
@@ -1799,7 +1830,7 @@ export function ensureAcpChatSubscriptions(): void {
     const state = useAcpChatSessionStore.getState();
     if (
       evidence
-      && !deferInactiveImageGenerationCompletion(state.activeSessionKey, evidence)
+      && !deferInactiveImageGenerationCompletion(state.loading ? null : state.activeSessionKey, evidence)
     ) void state.projectImageGenerationCompletion(evidence);
   });
   hostEvents.onChatRuntimeEvent((event) => {
@@ -1807,7 +1838,7 @@ export function ensureAcpChatSubscriptions(): void {
     const state = useAcpChatSessionStore.getState();
     if (
       evidence
-      && !deferInactiveImageGenerationCompletion(state.activeSessionKey, evidence)
+      && !deferInactiveImageGenerationCompletion(state.loading ? null : state.activeSessionKey, evidence)
     ) void state.projectImageGenerationCompletion(evidence);
   });
 }
