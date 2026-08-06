@@ -60,6 +60,7 @@ requiredRules:
   - provider-model-selection-authority
   - sidebar-session-attention-authority
   - web-browser-security-and-lifecycle
+  - e2e-parallel-isolation
   - comms-regression
   - docs-sync
 forbiddenPatterns:
@@ -96,6 +97,6 @@ Scheduled-task history is Main-owned backend data. Current OpenClaw versions mus
 
 The local HTML Preview privileged bridge is also Main-owned: Renderer may load a validated local HTML file or open that current file externally through the typed Host API. The guest is an implementation detail of the existing `preview` tab; there is no `web-browser` artifact tab or general address navigation. The durable guest contract is `harness/reference/web-browser.md`.
 
-Gateway session-catalog subscription, normalization, ordered list/event replay, attention transitions, and reconnect recovery are documented in `harness/reference/sidebar-session-attention.md`.
+Gateway session-catalog subscription, normalization, ordered list/event replay, attention transitions, and reconnect recovery are documented in `harness/reference/sidebar-session-attention.md`. Electron test-process isolation and global-resource scheduling are documented in `harness/reference/e2e-parallelism.md`.
 
 Gateway WebSocket heartbeat misses are diagnostic availability signals only. They may mark health unresponsive, but must not terminate the socket or replace the Gateway process; authoritative process-exit and socket-close signals retain automatic lifecycle recovery ownership.

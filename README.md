@@ -402,6 +402,10 @@ pnpm package:linux        # Package for Linux
 
 On headless Linux, run Electron tests under a display server such as `xvfb-run -a pnpm run test:e2e`.
 
+Electron E2E functional specs use two Playwright workers by default both locally and in CI; set `CLAWX_E2E_WORKERS=<positive integer>` to tune the ordinary parallel lane for the machine. Tests that touch OS-global state use the one-worker `exclusive` project, and host performance profiles run alone afterward. New E2E tests are parallel by default; apply `E2E_EXCLUSIVE_TAG` from `tests/e2e/parallel-policy.ts` when a test uses the real clipboard or another machine-global resource.
+
+For a focused ordinary spec that does not need the exclusive prerequisite, run `pnpm exec playwright test <spec> --project=parallel --no-deps`.
+
 ### Electron Performance Diagnostics
 
 `pnpm run perf:chat` runs isolated synthetic ACP workloads for streaming and for rich static Markdown sidebar/scroll interaction. It writes versioned metrics plus Renderer and Main CPU profiles under the Playwright `test-results/` directory. The Renderer profiles cover the production store/render path and frame pacing. The streaming Main profile measures Main-to-Renderer IPC fanout; the interaction Main profile shows whether Main remains idle while Renderer interactions run. Neither includes the upstream OpenClaw/ACP subprocess or GPU-process paths. Open a CPU profile in Chrome DevTools; the artifacts contain generated fixture text only and are not product telemetry. Results are hardware-dependent, so compare repeated runs on the same machine instead of applying one cross-platform absolute threshold.
@@ -432,6 +436,7 @@ from `dist/` and `dist-electron/`, so it does not require manually running
 - builds the renderer and Electron bundles with `pnpm run build:vite`
 - starts Electron in an isolated E2E mode with a temporary `HOME`
 - uses a temporary ClawX `userData` directory
+- runs ordinary spec files concurrently while fencing OS-global and performance tests
 - skips heavy startup side effects such as gateway auto-start, bundled skill
   installation, tray creation, and CLI auto-install
 
@@ -441,7 +446,7 @@ The first two baseline specs cover:
 - skipping setup and navigating to the Models page inside the Electron app
 
 Add future Electron flows under `tests/e2e/` and reuse the shared fixture in
-`tests/e2e/fixtures/electron.ts`.
+`tests/e2e/fixtures/electron.ts`. Keep tests parallel-safe by avoiding fixed writable paths, ports, native keychains, and other external shared state; use `E2E_EXCLUSIVE_TAG` when isolation is not possible.
 ### Tech Stack
 
 | Layer | Technology |

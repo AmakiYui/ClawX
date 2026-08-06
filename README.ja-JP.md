@@ -402,6 +402,10 @@ pnpm package:linux        # Linux向けにパッケージ化
 
 ヘッドレス Linux では Electron テストに表示サーバーが必要です。`xvfb-run -a pnpm run test:e2e` を利用してください。
 
+Electron E2E の機能テストはローカルと CI の両方で既定で 2 つの Playwright worker を使用します。通常の並列レーンは `CLAWX_E2E_WORKERS=<正の整数>` でマシンに合わせて調整できます。OS 全体の状態を扱うテストは 1 worker の `exclusive` project に入り、ホストのパフォーマンスプロファイルは機能テスト後に単独で実行されます。新しい E2E テストは既定で並列です。実クリップボードなどのマシン全体で共有されるリソースを使う場合は、`tests/e2e/parallel-policy.ts` の `E2E_EXCLUSIVE_TAG` を適用してください。
+
+独占前提を必要としない通常の spec だけを実行する場合は、`pnpm exec playwright test <spec> --project=parallel --no-deps` を使用します。
+
 ### Electron パフォーマンス診断
 
 `pnpm run perf:chat` は隔離された合成 ACP 負荷を実行し、ストリーミング応答と、リッチな静的 Markdown 会話でのサイドバーおよびスクロール操作を測定します。Playwright の `test-results/` には、バージョン付きメトリクスと Renderer/Main CPU プロファイルが出力されます。Renderer プロファイルは本番の store/render 経路とフレームペーシングを対象とします。ストリーミング Main プロファイルは Main から Renderer への IPC fanout を測定し、操作時の Main プロファイルは Renderer 操作中に Main がアイドルのままかを確認します。どちらも上流の OpenClaw/ACP サブプロセスや GPU プロセスの経路は含みません。CPU プロファイルは Chrome DevTools で開けます。アーティファクトには生成されたテスト文字列だけが含まれ、製品テレメトリーには送信されません。測定値はハードウェアに依存するため、共通の絶対閾値ではなく同じマシン上の複数回の結果を比較してください。

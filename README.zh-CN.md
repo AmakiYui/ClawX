@@ -403,6 +403,10 @@ pnpm package:linux        # 为 Linux 打包
 
 在无头 Linux 环境下，Electron 测试需要显示服务；可使用 `xvfb-run -a pnpm run test:e2e`。
 
+Electron E2E 功能测试在本地和 CI 中默认使用两个 Playwright worker；可通过 `CLAWX_E2E_WORKERS=<正整数>` 按机器能力调整普通并行通道。访问操作系统全局状态的测试进入单 worker 的 `exclusive` project，主机性能采样则在功能测试结束后独占运行。新增 E2E 测试默认并行；若测试使用真实剪贴板或其他机器级共享资源，请应用 `tests/e2e/parallel-policy.ts` 中的 `E2E_EXCLUSIVE_TAG`。
+
+如果只需运行一个不依赖独占前置阶段的普通 spec，可使用 `pnpm exec playwright test <spec> --project=parallel --no-deps`。
+
 ### Electron 性能诊断
 
 `pnpm run perf:chat` 会运行隔离的合成 ACP 负载，分别覆盖流式响应，以及富 Markdown 静态会话中的侧栏和滚动交互，并在 Playwright 的 `test-results/` 目录输出版本化指标与 Renderer/Main CPU Profile。Renderer Profile 覆盖生产 store/render 路径和帧节奏；流式 Main Profile 测量 Main 到 Renderer 的 IPC fanout，交互 Main Profile 用于确认 Renderer 交互期间 Main 是否保持空闲。两者都不包含上游 OpenClaw/ACP 子进程或 GPU 进程路径。CPU Profile 可直接用 Chrome DevTools 打开；其中只包含生成的测试文本，不会上报为产品遥测。性能数据依赖硬件，应在同一机器上多次运行后对比，不应使用统一的跨平台绝对阈值。
