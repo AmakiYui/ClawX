@@ -51,6 +51,7 @@ requiredRules:
   - host-api-fallback-policy
   - host-events-fallback-policy
   - gateway-readiness-policy
+  - gateway-heartbeat-safety
   - channel-plugin-migration-guards
   - capability-owner-resolution
   - active-config-guards
@@ -98,3 +99,5 @@ The local HTML Preview privileged bridge is also Main-owned: Renderer may load a
 Gateway session-catalog subscription, normalization, ordered list/event replay, attention transitions, and reconnect recovery are documented in `harness/reference/sidebar-session-attention.md`.
 
 Gateway session rows are also authoritative for Chat reasoning-effort controls. Renderer may project `thinkingLevel`, `thinkingLevels`, and `thinkingDefault` into the session catalog and may update the explicit current-session override only through the Main-owned `sessions.patch` RPC boundary. The selected explicit override is also copied unchanged into the typed ACP prompt metadata so execution cannot silently use a different prompt-level effort; inherited sessions omit that field. A local draft missing from the catalog may use only the agent-scoped `sessions.list.defaults` thinking metadata from that request until Gateway returns a persisted row. Renderer must not invent thinking levels from model names. Custom-provider primary models are synced with the fixed `low`, `medium`, and `high` OpenClaw reasoning ladder so Gateway can advertise those levels to Chat; the picker adds advertised `off` as the direct way to disable reasoning and does not expose a separate toggle. Provider settings do not expose enable-reasoning controls. An ACP prompt that is unexpectedly reported as cancelled must cross the typed host boundary as a prompt-aborted failure and produce a localized retryable Renderer error; an explicit user cancellation remains a successful stop action.
+
+Gateway WebSocket heartbeat misses are diagnostic availability signals for the first nine consecutive misses and must not interrupt long-running work during that window. A pong or any incoming Gateway message resets the sequence. On the tenth consecutive miss, Main may request the guarded Gateway restart path when auto-recovery is enabled and lifecycle state is still running; the heartbeat callback must not directly terminate the socket or process. Authoritative process-exit and socket-close signals retain their existing automatic lifecycle paths.
