@@ -411,11 +411,27 @@ export class GatewayManager extends EventEmitter {
           tSpawned = Date.now();
         },
         waitForReady: async (port) => {
+          const recoveringOwnedProcess = tSpawned === 0
+            && this.process?.pid != null
+            && this.ownsProcess;
           await waitForGatewayReady({
             port,
             getProcessExitCode: () => this.processExitCode,
+            // A code-1012 in-process reload normally returns within seconds.
+            // Do not hold the lifecycle lock for the general 2400-attempt cold
+            // startup budget when the owned process is alive but no longer serves WS.
+            ...(recoveringOwnedProcess ? { retries: 50 } : {}),
           });
           tReady = Date.now();
+        },
+        terminateStaleOwnedProcess: async () => {
+          const shouldReconnect = this.shouldReconnect;
+          this.shouldReconnect = false;
+          try {
+            await this.forceTerminateOwnedProcessForQuit();
+          } finally {
+            this.shouldReconnect = shouldReconnect;
+          }
         },
         onConnectedToManagedGateway: () => {
           this.startHealthCheck();

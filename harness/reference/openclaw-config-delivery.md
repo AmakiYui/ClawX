@@ -6,8 +6,8 @@ Provider, Agent, Channel, skill, proxy, image-generation, and plugin-install hel
 
 1. If Gateway is running, call `config.get` and require its runtime-shaped `config` object and `hash`. The coordinator accepts `raw` only as a compatibility fallback for older responses.
 2. Clone the runtime-shaped config, apply the mutator, and call `config.set` with the serialized result and `baseHash: hash`. Using source-shaped `raw` as the preferred baseline can misalign redacted secret paths with OpenClaw's runtime-shaped restore baseline.
-3. Retry one base-hash conflict from a fresh `config.get`; fail other RPC errors without writing around the running Gateway.
-4. Treat success as converged and do not send `SIGUSR1` or replace the process.
+3. Retry one base-hash conflict from a fresh `config.get`; fail other RPC errors without writing around the running Gateway. If `config.set` durably wrote the exact requested snapshot but its response was lost when OpenClaw began a native code-1012 reload, verify that persisted snapshot after Gateway leaves running state and accept the existing commit without replaying it.
+4. Treat success as converged and do not send `SIGUSR1` or schedule a redundant ClawX process replacement.
 5. If Gateway is stopped or starting, apply the same mutator to `resolveOpenClawConfigPath()` under the shared config lock and do not start the Gateway.
 
 This is not a write-then-notify design. No provider, Agent, Channel, skill, proxy, image-generation, or plugin-install helper may write the active config independently. The coordinator prevents a locally read stale snapshot from overwriting concurrent Gateway or CLI config changes.
