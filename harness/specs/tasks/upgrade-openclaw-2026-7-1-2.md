@@ -7,12 +7,15 @@ intent: Apply the OpenClaw 2026.7.1 correction releases without regressing ClawX
 touchedAreas:
   - package.json
   - pnpm-lock.yaml
+  - pnpm-workspace.yaml
+  - patches/openclaw@2026.7.1-2.patch
   - electron/gateway/config-sync.ts
   - electron/gateway/manager.ts
   - electron/utils/openclaw-upgrade-snapshot.ts
   - tests/unit/gateway-ready-fallback.test.ts
   - tests/unit/openclaw-bundle-config.test.ts
   - tests/unit/openclaw-upgrade-snapshot.test.ts
+  - tests/unit/openclaw-restart-recovery-patch.test.ts
   - harness/reference/openclaw-config-delivery.md
   - harness/specs/tasks/upgrade-openclaw-2026-7-1.md
   - harness/specs/tasks/upgrade-openclaw-2026-7-1-2.md
@@ -38,6 +41,7 @@ requiredTests:
   - tests/unit/openclaw-auth.test.ts
   - tests/unit/acp-chat-service.test.ts
   - tests/unit/gateway-startup-orchestrator.test.ts
+  - tests/unit/openclaw-restart-recovery-patch.test.ts
 acceptance:
   - The OpenClaw runtime is pinned to 2026.7.1-2 and resolves @openclaw/ai 2026.7.1-2.
   - External channel plugin package versions and ClawX's supported channel catalog remain unchanged because the correction release does not change channel APIs or manifests.
