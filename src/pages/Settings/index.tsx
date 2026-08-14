@@ -1075,7 +1075,7 @@ export function Settings() {
                 <Button
                   variant="link"
                   className="h-auto p-0 text-sm text-blue-500 hover:text-blue-600 font-medium"
-                  onClick={() => window.electron.openExternal('https://github.com/Amayoshi99/ClawX')}
+                  onClick={() => window.electron.openExternal('https://github.com/AmakiYui/ClawX')}
                 >
                   {t('about.github')}
                 </Button>

@@ -207,7 +207,7 @@ export async function createMenu(language?: string): Promise<void> {
         {
           label: labels.help.reportIssue,
           click: async () => {
-            await shell.openExternal('https://github.com/Amayoshi99/ClawX/issues');
+            await shell.openExternal('https://github.com/AmakiYui/ClawX/issues');
           },
         },
         { type: 'separator' },
