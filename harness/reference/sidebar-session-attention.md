@@ -19,7 +19,7 @@ The bundled OpenClaw 2026.6.10 behavior supporting this authority is:
 1. `sessions.subscribe` enables `sessions.changed` notifications for a Gateway connection.
 2. A notification includes a session snapshot when the Gateway can provide one.
 3. `sessions.list` reconstructs `hasActiveRun` from the active-run registry and is the canonical recovery snapshot.
-4. The OpenClaw WebUI applies reliable event snapshots and reloads the list when it cannot apply an event safely.
+4. The openclaw-webUI applies reliable event snapshots and reloads the list when it cannot apply an event safely.
 5. Terminal status overrides a stale active-run boolean; otherwise the boolean is authoritative, with `running` as the compatibility fallback.
 
 When validating this upstream contract against a new OpenClaw version, inspect the session-list projection in `list.ts` and the WebUI Gateway reducer in `event.ts`, as well as the protocol definitions for subscription, event, and patch fields. Basenames are stated here because upstream source layout can move between releases.

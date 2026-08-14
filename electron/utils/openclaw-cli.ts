@@ -226,7 +226,7 @@ export function getOpenClawEmbeddedForkSpec(args: string[] = []): OpenClawEmbedd
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     OPENCLAW_NO_RESPAWN: '1',
-    OPENCLAW_EMBEDDED_IN: 'ClawX',
+    OPENCLAW_EMBEDDED_IN: 'openclaw-w-',
     OPENCLAW_EXEC_SHELL_SNAPSHOT: '0',
   };
 
@@ -512,7 +512,7 @@ export function generateCompletionCache(): void {
       ...process.env,
       ELECTRON_RUN_AS_NODE: '1',
       OPENCLAW_NO_RESPAWN: '1',
-      OPENCLAW_EMBEDDED_IN: 'ClawX',
+      OPENCLAW_EMBEDDED_IN: 'openclaw-w-',
     },
     stdio: 'ignore',
     detached: false,
@@ -549,7 +549,7 @@ export function installCompletionToProfile(): void {
         ...process.env,
         ELECTRON_RUN_AS_NODE: '1',
         OPENCLAW_NO_RESPAWN: '1',
-        OPENCLAW_EMBEDDED_IN: 'ClawX',
+        OPENCLAW_EMBEDDED_IN: 'openclaw-w-',
       },
       stdio: 'ignore',
       detached: false,

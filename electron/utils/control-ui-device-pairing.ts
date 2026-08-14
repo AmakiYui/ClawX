@@ -157,7 +157,7 @@ async function approveViaOpenClawCli(requestId: string, _port: number): Promise<
         ...baseEnv,
         ...uvEnv,
         OPENCLAW_NO_RESPAWN: '1',
-        OPENCLAW_EMBEDDED_IN: 'ClawX',
+        OPENCLAW_EMBEDDED_IN: 'openclaw-w-',
       } as NodeJS.ProcessEnv,
     });
 
